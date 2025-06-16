@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Vacaciones;
 use App\Models\Empleado;
 use App\Models\EstadoSolicitud;
+use App\Models\CicloServicio;
 use App\Models\VacacionesOfficiales;
 use App\Helpers\ApiResponse;
 use App\Exceptions\BusinessException; // Excepción personalizada
@@ -40,73 +41,172 @@ class VacacionesService
     // y que el empleado tenga vacaciones disponibles.
     // Si la solicitud es aceptada, se actualiza el estado de la solicitud
 // ... otras partes del servicio ...
+  public function registrarSolicitud(array $data)
+    {
+        // 1. Validar si el empleado existe
+        $empleado = Empleado::find($data['empleado_id']);
+        if (!$empleado) {
+            throw new EmpleadoNoEncontradoException('Empleado no encontrado.', 404);
+        }
 
-public function registrarSolicitud(array $data)
-{
-    // 1. Validar si el empleado existe
-    $empleado = Empleado::find($data['empleado_id']);
-    if (!$empleado) {
-        throw new EmpleadoNoEncontradoException('Empleado no encontrado.', 404);
+        if (strtoupper($empleado->estado) !== 'ACTIVO') {
+            throw new BusinessException('El empleado debe estar activo para solicitar vacaciones.', 403);
+        }
+
+        // Obtener el ciclo de servicio actual para el empleado o crearlo
+        // Esta parte es importante porque determinará sobre qué registro de vacaciones trabajaremos.
+        $cicloServicioActual = CicloServicio::firstOrCreate([
+            'empleado_id' => $empleado->id,
+            'anio' => now()->year,
+        ]);
+
+        // 2. Calcular los días base de vacaciones para el ciclo actual (por antigüedad)
+        $diasBasePorAntiguedad = $this->calcularDiasBasePorAntiguedad($empleado->id);
+
+         // 3. Obtener el registro de Vacaciones para el CICLO ACTUAL.
+        // Si no existe, se asumirán 0 días arrastrados para esta solicitud,
+        // ya que la asignación inicial de días arrastrados se hará con `inicializarVacacionesEmpleadoHistorico`.
+        $vacacionCicloActual = Vacaciones::where('empleado_id', $empleado->id)
+                                        ->where('ciclo_servicio_id', $cicloServicioActual->id)
+                                        ->first();
+
+        // Los días arrastrados para esta solicitud se toman del registro existente para el ciclo actual.
+        // Si el registro aún no existe, o si no se inicializó con `inicializarVacacionesEmpleadoHistorico`,
+        // los días arrastrados serán 0 hasta que el primer registro del ciclo se cree (manualmente o por el boot).
+        $diasArrastrados = $vacacionCicloActual ? $vacacionCicloActual->dias_vacaciones_arrastrados : 0;
+
+        // 4. El total de días de vacaciones ASIGNADOS para este ciclo
+        $vacacionesTotalesAsignadas = $diasBasePorAntiguedad + $diasArrastrados;
+
+
+        if ($vacacionesTotalesAsignadas <= 0) {
+            throw new BusinessException('El empleado no tiene vacaciones disponibles para este ciclo o su antigüedad no le otorga días.', 403);
+        }
+        // 5. Calcular días solicitados entre las fechas
+        $fechaInicio = Carbon::parse($data['fecha_inicio']);
+        $fechaFin = Carbon::parse($data['fecha_fin']);
+        $diasSolicitados = $this->calcularDiasLaborables($fechaInicio, $fechaFin, $empleado->tipo_contrato);
+
+        // 5.1. Validar traslape de fechas (esta lógica parece correcta y no necesita cambios)
+        $traslapo = Vacaciones::where('empleado_id', $empleado->id)
+            ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
+            ->where(function ($q) use ($fechaInicio, $fechaFin) {
+                $q->whereBetween('fecha_inicio', [$fechaInicio, $fechaFin])
+                    ->orWhereBetween('fecha_fin', [$fechaInicio, $fechaFin])
+                    ->orWhere(function ($q2) use ($fechaInicio, $fechaFin) {
+                        $q2->where('fecha_inicio', '<=', $fechaInicio)
+                            ->where('fecha_fin', '>=', $fechaFin);
+                    });
+            })
+            ->exists();
+
+        if ($traslapo) {
+            throw new BusinessException('Ya existe una solicitud de vacaciones aprobada que se cruza con estas fechas.');
+        }
+
+        // A. Obtener días de vacaciones usados (de solicitudes aprobadas) para el CICLO ACTUAL
+        // Es crucial que esto sume los días disfrutados DENTRO del ciclo actual.
+        $diasVacacionesUsados = Vacaciones::where('empleado_id', $empleado->id)
+            ->where('ciclo_servicio_id', $cicloServicioActual->id) // Sumar solo para el ciclo actual
+            ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
+            ->sum('dias_vacaciones_solicitados');
+
+
+        // B. Calcular días disponibles REALES antes de la solicitud
+        // Aquí la `vacacionesTotalesAsignadas` ya incluye los arrastrados.
+        $diasDisponiblesActuales = $vacacionesTotalesAsignadas - $diasVacacionesUsados;
+
+        // 6. Verificar si hay suficientes días disponibles para esta nueva solicitud
+        if ($diasSolicitados > $diasDisponiblesActuales) {
+            throw new BusinessException("No hay suficientes días de vacaciones disponibles. Disponibles: {$diasDisponiblesActuales}, Solicitados: {$diasSolicitados}", 403);
+        }
+
+        // 7. Agregar campos calculados a los datos
+        $data['dias_vacaciones_totales'] = $vacacionesTotalesAsignadas; // Este ya incluye los arrastrados
+        $data['dias_vacaciones_arrastrados'] = $diasArrastrados; // Asignamos el valor que obtuvimos
+        $data['dias_vacaciones_solicitados'] = $diasSolicitados;
+        $data['dias_vacaciones_disfrutados'] = 0; // Se disfruta cuando se aprueba y se usa (o al final del periodo)
+        $data['dias_vacaciones_disponibles'] = $diasDisponiblesActuales - $diasSolicitados; // Los días que quedarán disponibles si esta solicitud fuera aprobada
+
+        // 8. Establecer la fecha de solicitud a la fecha actual y estado inicial (PENDIENTE)
+        $data['fecha_solicitud'] = Carbon::now();
+        $estadoPendiente = EstadoSolicitud::where('estado', 'PENDIENTE')->firstOrFail();
+        $data['estado_solicitud_id'] = $estadoPendiente->id;
+        $data['ciclo_servicio_id'] = $cicloServicioActual->id; // Aseguramos que se usa el ID del ciclo actual
+
+        // 9. Guardar la solicitud
+        $solicitud = Vacaciones::create($data);
+
+        return ApiResponse::success($solicitud);
     }
 
-    // 2. Calcular total de días de vacaciones disponibles (Asignados)
-    $vacacionesTotalesAsignadas = $this->calcularVacacionesTotales($data['empleado_id']);
-    if ($vacacionesTotalesAsignadas <= 0) {
-        throw new BusinessException('El empleado no tiene vacaciones disponibles para este ciclo o su antigüedad no le otorga días.', 403);
+    /**
+     * Inicializa el registro de vacaciones para un empleado "nuevo en sistema" pero con historial,
+     * permitiendo asignar días arrastrados manualmente. Este método crea el *primer* registro
+     * de vacaciones para el empleado en el ciclo actual.
+     *
+     * @param array $data Contiene 'empleado_id' y opcionalmente 'dias_vacaciones_arrastrados'.
+     * @return \Illuminate\Http\JsonResponse
+     * @throws EmpleadoNoEncontradoException
+     * @throws BusinessException Si ya existen vacaciones para el empleado en el ciclo actual.
+     */
+    public function inicializarVacacionesEmpleadoHistorico(array $data)
+    {
+        // 1. Validar si el empleado existe
+        $empleado = Empleado::find($data['empleado_id']);
+        if (!$empleado) {
+            throw new EmpleadoNoEncontradoException('Empleado no encontrado.', 404);
+        }
+
+        // 2. Encontrar o crear el ciclo de servicio actual para el empleado
+        $cicloServicioActual = CicloServicio::firstOrCreate([
+            'empleado_id' => $empleado->id,
+            'anio' => now()->year,
+        ]);
+
+        // 3. Verificar si ya existe un registro de vacaciones para este empleado y ciclo
+        $existingVacacion = Vacaciones::where('empleado_id', $empleado->id)
+                                        ->where('ciclo_servicio_id', $cicloServicioActual->id)
+                                        ->first();
+
+        if ($existingVacacion) {
+            throw new BusinessException('Ya existen vacaciones registradas para este empleado en el ciclo actual. Use el método de actualización si necesita modificar días arrastrados existentes.', 409);
+        }
+
+        // 4. Determinar los días de vacaciones arrastrados (desde la entrada manual, si existe)
+        $diasArrastrados = isset($data['dias_vacaciones_arrastrados']) && is_numeric($data['dias_vacaciones_arrastrados'])
+            ? (int) $data['dias_vacaciones_arrastrados']
+            : 0;
+
+        // 5. Calcular los días base de vacaciones para el ciclo actual (por antigüedad)
+        $diasBasePorAntiguedad = $this->calcularDiasBasePorAntiguedad($empleado->id);
+
+        // 6. Calcular el total de días de vacaciones asignados para el ciclo actual
+        $diasVacacionesTotales = $diasBasePorAntiguedad + $diasArrastrados;
+
+        // 7. Obtener el estado inicial (PENDIENTE o un estado específico como 'ASIGNADO_INICIAL')
+        // Es recomendable tener un estado claro para estos registros iniciales que no son "solicitudes".
+        $estadoInicial = EstadoSolicitud::where('estado', 'PENDIENTE')->firstOrFail();
+
+        // 8. Crear el registro de Vacaciones
+        $vacacionInicial = Vacaciones::create([
+            'empleado_id' => $empleado->id,
+            'ciclo_servicio_id' => $cicloServicioActual->id,
+            'dias_vacaciones_totales' => $diasVacacionesTotales,
+            'dias_vacaciones_arrastrados' => $diasArrastrados,
+            'dias_vacaciones_disfrutados' => 0, // Al inicializar, no ha disfrutado días
+            'dias_vacaciones_solicitados' => 0, // No es una solicitud, es una asignación
+            'dias_vacaciones_disponibles' => $diasVacacionesTotales, // Al inicio, disponibles = totales
+            'fecha_solicitud' => Carbon::now(), // Fecha de cuando se crea este registro inicial
+            'fecha_inicio' => null, // No hay fechas de disfrute asociadas a este registro inicial
+            'fecha_fin' => null,
+            'estado_solicitud_id' => $estadoInicial->id,
+            'observaciones' => 'Registro inicial de vacaciones para el ciclo actual, incluyendo días arrastrados de historial manual.',
+        ]);
+
+        return ApiResponse::success($vacacionInicial);
     }
 
-    // 3. Calcular días solicitados entre las fechas
-    $fechaInicio = Carbon::parse($data['fecha_inicio']);
-    $fechaFin = Carbon::parse($data['fecha_fin']);
-    $diasSolicitados = $this->calcularDiasLaborables($fechaInicio, $fechaFin, $empleado->tipo_contrato);
-
-    // 3.1. Validar traslape de fechas
-    $traslapo = Vacaciones::where('empleado_id', $empleado->id)
-    ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
-    ->where(function ($q) use ($fechaInicio, $fechaFin) {
-        $q->whereBetween('fecha_inicio', [$fechaInicio, $fechaFin])
-          ->orWhereBetween('fecha_fin', [$fechaInicio, $fechaFin])
-          ->orWhere(function ($q2) use ($fechaInicio, $fechaFin) {
-              $q2->where('fecha_inicio', '<=', $fechaInicio)
-                 ->where('fecha_fin', '>=', $fechaFin);
-          });
-    })
-    ->exists();
-
-    if ($traslapo) {
-        throw new BusinessException('Ya existe una solicitud de vacaciones aprobada que se cruza con estas fechas.');
-    }
-
-    // A. Obtener días de vacaciones usados (de solicitudes aprobadas)
-    $diasVacacionesUsados = Vacaciones::where('empleado_id', $empleado->id)
-                                    ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
-                                    ->sum('dias_vacaciones_solicitados');
-
-
-    // B. Calcular días disponibles REALES antes de la solicitud
-    $diasDisponiblesActuales = $vacacionesTotalesAsignadas - $diasVacacionesUsados;
-
-    // 4. Verificar si hay suficientes días disponibles para esta nueva solicitud
-    if ($diasSolicitados > $diasDisponiblesActuales) {
-        throw new BusinessException("No hay suficientes días de vacaciones disponibles. Disponibles: {$diasDisponiblesActuales}, Solicitados: {$diasSolicitados}", 403);
-    }
-
-    // 5. Agregar campos calculados a los datos
-    $data['dias_vacaciones_totales'] = $vacacionesTotalesAsignadas; // Total que el empleado tiene por antigüedad
-    $data['dias_vacaciones_solicitados'] = $diasSolicitados;
-    $data['dias_vacaciones_disfrutados'] = 0; // Se disfruta cuando se aprueba y se usa (o al final del periodo)
-    $data['dias_vacaciones_disponibles'] = $diasDisponiblesActuales - $diasSolicitados; // Los días que quedarán disponibles si esta solicitud fuera aprobada
-
-    // 6. Establecer la fecha de solicitud a la fecha actual y estado inicial (PENDIENTE)
-    $data['fecha_solicitud'] = Carbon::now();
-    $estadoPendiente = EstadoSolicitud::where('estado', 'PENDIENTE')->firstOrFail();
-    $data['estado_solicitud_id'] = $estadoPendiente->id;
-
-    // 7. Guardar la solicitud
-    $solicitud = Vacaciones::create($data);
-
-    return ApiResponse::success($solicitud);
-}
 
 
     private function calcularDiasLaborables(Carbon $inicio, Carbon $fin, string $tipoContrato): int
@@ -310,7 +410,9 @@ public function registrarSolicitud(array $data)
 
     // ─────────────── 4. UTILIDADES Y DISPONIBILIDAD ───────────────
 
-    public function calcularVacacionesTotales($empleadoId)
+ // Renombramos calcularVacacionesTotales a calcularDiasBasePorAntiguedad
+    // para mayor claridad, ya que ahora el "total" es la suma de base + arrastrados.
+    public function calcularDiasBasePorAntiguedad($empleadoId)
     {
         $empleado = Empleado::find($empleadoId);
         if (!$empleado) return 0;
@@ -323,22 +425,49 @@ public function registrarSolicitud(array $data)
         return $registro->dias_vacaciones ?? 0;
     }
 
-    // Este método obtiene la disponibilidad de vacaciones de un empleado específico.
+    // Actualizamos getDisponibilidad para considerar los días arrastrados
     public function getDisponibilidad($empleadoId)
     {
-        $empleado = Empleado::findOrFail($empleadoId); // Usamos findOrFail para lanzar una excepción si no se encuentra
+        $empleado = Empleado::findOrFail($empleadoId);
 
-        $total = $this->calcularVacacionesTotales($empleadoId);
+        // Obtener el ciclo de servicio actual del empleado
+        $cicloServicioActual = CicloServicio::where('empleado_id', $empleadoId)
+                                            ->where('anio', now()->year)
+                                            ->first();
 
-        $usado = Vacaciones::where('empleado_id', $empleadoId)
-            ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
-            ->sum('dias_vacaciones_solicitados');
+        $diasBase = $this->calcularDiasBasePorAntiguedad($empleadoId);
+        $diasArrastrados = 0;
+        $diasUsados = 0;
+
+        if ($cicloServicioActual) {
+            // Obtener el registro de Vacaciones (el primero) para el ciclo actual
+            $vacacionCicloActual = Vacaciones::where('empleado_id', $empleadoId)
+                                            ->where('ciclo_servicio_id', $cicloServicioActual->id)
+                                            ->first(); // Solo el primer registro que lleva los arrastrados
+
+            if ($vacacionCicloActual) {
+                $diasArrastrados = $vacacionCicloActual->dias_vacaciones_arrastrados;
+            }
+
+            // Sumar los días solicitados aprobados para el ciclo actual
+            $diasUsados = Vacaciones::where('empleado_id', $empleadoId)
+                                    ->where('ciclo_servicio_id', $cicloServicioActual->id)
+                                    ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
+                                    ->sum('dias_vacaciones_solicitados');
+        }
+
+        // El total asignado ahora es la suma de los días base y los días arrastrados
+        $totalAsignado = $diasBase + $diasArrastrados;
+        $disponible = $totalAsignado - $diasUsados;
+
 
         return ApiResponse::success([
             'empleado' => $empleado->getFullName(),
-            'total_asignado' => $total,
-            'usado' => $usado,
-            'disponible' => $total - $usado,
+            'total_base_por_antiguedad' => $diasBase, // Puedes mostrar esto para claridad
+            'dias_arrastrados' => $diasArrastrados, // Mostrar el nuevo campo
+            'total_asignado' => $totalAsignado,
+            'usado' => $diasUsados,
+            'disponible' => $disponible,
         ]);
     }
 

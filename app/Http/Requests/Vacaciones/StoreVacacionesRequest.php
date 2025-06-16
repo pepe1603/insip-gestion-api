@@ -33,12 +33,6 @@ class StoreVacacionesRequest extends FormRequest
 
             // Cambia 'motivo' a 'observaciones' para que coincida con el frontend
             'observaciones' => ['nullable', 'string', 'max:255'],
-
-            // Aunque el frontend envía 'dias_vacaciones_solicitados', tu servicio lo recalcula.
-            // Si quieres validarlo como un número entero mínimo 1 (aunque el servicio lo sobreescribe),
-            // lo puedes dejar como 'nullable'. Si tu servicio realmente es la única fuente de verdad
-            // para este campo, podrías incluso no validarlo aquí.
-            'dias_vacaciones_solicitados' => ['nullable', 'integer', 'min:1'],
         ];
     }
 

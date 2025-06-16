@@ -6,6 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Vacaciones\StoreVacacionesRequest;
 use App\Http\Requests\Vacaciones\UpdateVacacionesRequest;
 use App\Services\VacacionesService;
+use App\Exceptions\BusinessException;
+use App\Exceptions\EmpleadoNoEncontradoException;
+use App\Exceptions\EstadoSolicitudNoEncontradoException;
+use App\Helpers\ApiResponse;
+use Illuminate\Http\Request;
 
 class VacacionesController extends Controller
 {
@@ -24,8 +29,42 @@ class VacacionesController extends Controller
 
     public function store(StoreVacacionesRequest $request)
     {
-        return $this->vacacionesService->registrarSolicitud($request->validated());
+        try {
+            return $this->vacacionesService->registrarSolicitud($request->validated());
+
+        } catch (BusinessException | EmpleadoNoEncontradoException $e) {
+            return ApiResponse::error($e->getMessage(), $e->getCode());
+        } catch (\Exception $e) {
+            return ApiResponse::error('Error al registrar la solicitud: ' . $e->getMessage(), 500);
+        }
     }
+
+    /**
+     * Endpoint para inicializar el registro de vacaciones para un empleado
+     * con historial manual de días arrastrados.
+     * Solo debe ser usado por administradores para configurar el primer registro anual de vacaciones.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function inicializarVacacionesHistoricas(Request $request)
+    {
+        $request->validate([
+            'empleado_id' => 'required|exists:empleados,id',
+            'dias_vacaciones_arrastrados' => 'nullable|integer|min:0', // Permite 0 o un número positivo
+        ]);
+
+        try {
+            $vacacionInicial = $this->vacacionesService->inicializarVacacionesEmpleadoHistorico($request->all());
+            return $vacacionInicial;
+        } catch (BusinessException | EmpleadoNoEncontradoException | EstadoSolicitudNoEncontradoException $e) {
+            return ApiResponse::error($e->getMessage(), $e->getCode() ?: 400); // Proporciona un código por defecto si la excepción no lo tiene
+        } catch (\Exception $e) {
+            \Log::error("Error en inicializarVacacionesHistoricas: " . $e->getMessage() . " en " . $e->getFile() . " linea " . $e->getLine());
+            return ApiResponse::error('Error interno al inicializar vacaciones históricas.', 500);
+        }
+    }
+
 
     public function show($id)
     {
@@ -77,8 +116,16 @@ class VacacionesController extends Controller
         return  $this->vacacionesService->getPorPeriodo($desde, $hasta);
     }
 
-    public function disponibilidad($empleadoId)
+    public function getDisponibilidad($empleadoId)
     {
-        return $this->vacacionesService->getDisponibilidad($empleadoId);
+        try {
+
+            return $this->vacacionesService->getDisponibilidad($empleadoId);
+
+        } catch (EmpleadoNoEncontradoException $e) {
+            return ApiResponse::error($e->getMessage(), $e->getCode());
+        } catch (\Exception $e) {
+            return ApiResponse::error('Error al obtener la disponibilidad de vacaciones: ' . $e->getMessage(), 500);
+        }
     }
 }

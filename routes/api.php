@@ -136,7 +136,9 @@ Route::middleware('api')->group(function () {
         Route::get('/empleado/{empleadoId}', [VacacionesController::class, 'porEmpleado']);
         Route::get('/estado/{estadoId}', [VacacionesController::class, 'porEstado']);
         Route::get('/periodo/{desde}/{hasta}', [VacacionesController::class, 'porPeriodo']);
-        Route::get('/disponibilidad/{empleadoId}', [VacacionesController::class, 'disponibilidad']);
+        Route::get('/disponibilidad/{empleadoId}', [VacacionesController::class, 'getDisponibilidad']);
+        // ¡NUEVA RUTA para inicializar vacaciones históricas!
+    Route::post('/inicializar-historico', [VacacionesController::class, 'inicializarVacacionesHistoricas']);
     });
 
     Route::prefix('reporte-vacaciones')->group(function() {
