@@ -15,6 +15,8 @@ class Empleado extends Model
         'ape_materno',
         'ape_paterno',
         'fecha_ingreso',
+        'email',
+        'telefono',
         'puesto',
         'departamento_id',
         'status',

@@ -128,4 +128,20 @@ class VacacionesController extends Controller
             return ApiResponse::error('Error al obtener la disponibilidad de vacaciones: ' . $e->getMessage(), 500);
         }
     }
+
+    //ruta par consultar-disponibilidad
+    public function consultarDisponibilidad(Request $request)
+    {
+        $request->validate([
+            'empleado_id' => 'required|exists:empleados,id',
+        ]);
+
+        try {
+            return $this->vacacionesService->consultarDisponibilidad($request);
+        } catch (EmpleadoNoEncontradoException $e) {
+            return ApiResponse::error($e->getMessage(), $e->getCode());
+        } catch (\Exception $e) {
+            return ApiResponse::error('Error al consultar la disponibilidad: ' . $e->getMessage(), 500);
+        }
+    }
 }

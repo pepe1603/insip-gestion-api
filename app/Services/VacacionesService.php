@@ -4,11 +4,12 @@ namespace App\Services;
 
 use App\Models\Vacaciones;
 use App\Models\Empleado;
+use App\Models\Departamento;
 use App\Models\EstadoSolicitud;
 use App\Models\CicloServicio;
 use App\Models\VacacionesOfficiales;
 use App\Helpers\ApiResponse;
-use App\Exceptions\BusinessException; // Excepción personalizada
+use App\Exceptions\BusinessException;
 use App\Exceptions\EmpleadosExceptions\EmpleadoNoEncontradoException;
 use App\Exceptions\VacacionesExceptions\VacacionNoEncontradaException;
 use Carbon\Carbon;
@@ -16,87 +17,102 @@ use Illuminate\Support\Facades\DB;
 
 class VacacionesService
 {
-    // ───────────────────── 1. CRUD BÁSICO ─────────────────────
-
     public function all()
     {
         return ApiResponse::success(
-            Vacaciones::with('empleado', 'estadoSolicitud')->get()
+            Vacaciones::with('empleado', 'estadoSolicitud', 'cicloServicio:id,anio')->get()
         );
     }
 
     public function find($id)
     {
-        $solicitud = Vacaciones::with('empleado', 'estadoSolicitud')->findOrFail($id); // Usamos findOrFail para lanzar una excepción si no se encuentra
+        //retonamos la salicitud con sus relaciones y el ciclo de servicio inluido el nombre
+        $solicitud = Vacaciones::with('empleado', 'estadoSolicitud', 'cicloServicio.anio')->findOrFail($id);
         return ApiResponse::success($solicitud);
     }
 
-    //al crear una solicitud de vacaciones, se calcula la cantidad de días solicitados
-    // y se asigna a la propiedad 'dias_vacaciones_totales'.
-    //se calcula attrravez de la antigüedad del empleado y se compara cuantos dias le toca por ley de acuerdo a la tabla VacacionesOfficiales
-    // Se establece la fecha de solicitud a la fecha actual.
-    // Luego, se crea la solicitud de vacaciones en la base de datos.
-    // Finalmente, se devuelve una respuesta exitosa con la solicitud creada.
-    //se espera que la solicitud sea aceptada o rechazada
-    // y que el empleado tenga vacaciones disponibles.
-    // Si la solicitud es aceptada, se actualiza el estado de la solicitud
-// ... otras partes del servicio ...
-  public function registrarSolicitud(array $data)
+    public function registrarSolicitud(array $data)
     {
-        // 1. Validar si el empleado existe
         $empleado = Empleado::find($data['empleado_id']);
         if (!$empleado) {
             throw new EmpleadoNoEncontradoException('Empleado no encontrado.', 404);
         }
 
-        if (strtoupper($empleado->estado) !== 'ACTIVO') {
-            throw new BusinessException('El empleado debe estar activo para solicitar vacaciones.', 403);
+        //verificar si el empleado esta activo20
+        if (!$empleado->status || $empleado->status !== 'ACTIVO') {
+            throw new BusinessException("El empleado con id { $empleado->id } se encuentra en estado {$empleado->status}. No se pueden registrar solicitudes de vacaciones para empleados inactivos.", 403);
+        }
+        //verificar si el empleado tiene un contrato activo
+        if (!$empleado->tipo_contrato) {
+            throw new BusinessException("El empleado con id { $empleado->id } no tiene un tipo de contrato definido. No se pueden registrar solicitudes de vacaciones sin un tipo de contrato.", 403);
+
         }
 
-        // Obtener el ciclo de servicio actual para el empleado o crearlo
-        // Esta parte es importante porque determinará sobre qué registro de vacaciones trabajaremos.
+        //nueva validacion
+        //--- NUEVA VALIDACION DE SOLICITUDES PENDIENTES ---
+        $solicitudPendiente = Vacaciones::where('empleado_id', $empleado->id)
+            ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'PENDIENTE'))
+            ->exists();
+
+        if ($solicitudPendiente) {
+            throw new BusinessException('El empleado ya tiene una solicitud de vacaciones pendiente. No se puede crear una nueva solicitud hasta que la anterior sea procesada.', 403);
+        }
+
         $cicloServicioActual = CicloServicio::firstOrCreate([
             'empleado_id' => $empleado->id,
             'anio' => now()->year,
         ]);
 
-        // 2. Calcular los días base de vacaciones para el ciclo actual (por antigüedad)
-        $diasBasePorAntiguedad = $this->calcularDiasBasePorAntiguedad($empleado->id);
+        $vacacionAsignadaCicloActual = Vacaciones::where('empleado_id', $empleado->id)
+                                                ->where('ciclo_servicio_id', $cicloServicioActual->id)
+                                                ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'ASIGNADO'))
+                                                ->first();
 
-         // 3. Obtener el registro de Vacaciones para el CICLO ACTUAL.
-        // Si no existe, se asumirán 0 días arrastrados para esta solicitud,
-        // ya que la asignación inicial de días arrastrados se hará con `inicializarVacacionesEmpleadoHistorico`.
-        $vacacionCicloActual = Vacaciones::where('empleado_id', $empleado->id)
-                                        ->where('ciclo_servicio_id', $cicloServicioActual->id)
-                                        ->first();
+        if (!$vacacionAsignadaCicloActual) {
+           // throw new BusinessException('El empleado no tiene vacaciones asignadas para el ciclo actual. Por favor, asegúrese de que se haya procesado su aniversario o inicializado sus vacaciones.', 403);
+            //sele asiganación de vacaciones para el ciclo actual
+            $this->inicializarVacacionesEmpleadoHistorico(['empleado_id' => $empleado->id]);
 
-        // Los días arrastrados para esta solicitud se toman del registro existente para el ciclo actual.
-        // Si el registro aún no existe, o si no se inicializó con `inicializarVacacionesEmpleadoHistorico`,
-        // los días arrastrados serán 0 hasta que el primer registro del ciclo se cree (manualmente o por el boot).
-        $diasArrastrados = $vacacionCicloActual ? $vacacionCicloActual->dias_vacaciones_arrastrados : 0;
-
-        // 4. El total de días de vacaciones ASIGNADOS para este ciclo
-        $vacacionesTotalesAsignadas = $diasBasePorAntiguedad + $diasArrastrados;
-
-
-        if ($vacacionesTotalesAsignadas <= 0) {
-            throw new BusinessException('El empleado no tiene vacaciones disponibles para este ciclo o su antigüedad no le otorga días.', 403);
         }
-        // 5. Calcular días solicitados entre las fechas
-        $fechaInicio = Carbon::parse($data['fecha_inicio']);
-        $fechaFin = Carbon::parse($data['fecha_fin']);
+
+        $vacacionesTotalesAsignadas = $vacacionAsignadaCicloActual->dias_vacaciones_totales;
+
+        $fechaInicio = Carbon::parse($data['fecha_inicio'])->startOfDay();
+        $fechaFin = Carbon::parse($data['fecha_fin'])->startOfDay();
+
+
+        // Verificar si el empleado ha seleccionado las fechas de inicio y fin del dia de hoy, mandar una exception de negocios diciendo que las solicitudes de vacaciones deben ser para fechas futuras.
+        if ($fechaInicio->isToday() || $fechaFin->isToday()) {
+            throw new BusinessException('Las solicitudes de vacaciones deben ser para fechas futuras. No se pueden solicitar vacaciones para el día de hoy.', 400);
+        }
+
+        if ($fechaInicio->isAfter($fechaFin)) {
+            throw new BusinessException('La fecha de inicio no puede ser posterior a la fecha de fin.', 400);
+        }
+
         $diasSolicitados = $this->calcularDiasLaborables($fechaInicio, $fechaFin, $empleado->tipo_contrato);
 
-        // 5.1. Validar traslape de fechas (esta lógica parece correcta y no necesita cambios)
+        if ($diasSolicitados <= 0) {
+            throw new BusinessException('El período de vacaciones debe ser de al menos un día laborable.', 400);
+        }
+
+        // --- INICIO: NUEVA VALIDACIÓN DE MÁXIMO DE UNA SEMANA ---
+        // Se considera una semana como máximo 7 días, incluyendo fines de semana para contratos de tiempo completo.
+        // La función calcularDiasLaborables ya maneja la lógica de días hábiles vs calendario.
+        $MAX_DIAS_VACACIONES = 30;
+        if ($diasSolicitados > $MAX_DIAS_VACACIONES) {
+            throw new BusinessException("No se pueden solicitar más de {$MAX_DIAS_VACACIONES} días de vacaciones. Por favor, ajuste el período solicitado.", 400);
+        }
+        // --- FIN: NUEVA VALIDACIÓN DE MÁXIMO DE UNA SEMANA ---
+
+
         $traslapo = Vacaciones::where('empleado_id', $empleado->id)
             ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
-            ->where(function ($q) use ($fechaInicio, $fechaFin) {
-                $q->whereBetween('fecha_inicio', [$fechaInicio, $fechaFin])
-                    ->orWhereBetween('fecha_fin', [$fechaInicio, $fechaFin])
-                    ->orWhere(function ($q2) use ($fechaInicio, $fechaFin) {
-                        $q2->where('fecha_inicio', '<=', $fechaInicio)
-                            ->where('fecha_fin', '>=', $fechaFin);
-                    });
+            ->where(function ($query) use ($fechaInicio, $fechaFin) {
+                $query->where(function ($q) use ($fechaInicio, $fechaFin) {
+                    $q->whereDate('fecha_inicio', '<=', $fechaFin->toDateString())
+                      ->whereDate('fecha_fin', '>=', $fechaInicio->toDateString());
+                });
             })
             ->exists();
 
@@ -104,110 +120,89 @@ class VacacionesService
             throw new BusinessException('Ya existe una solicitud de vacaciones aprobada que se cruza con estas fechas.');
         }
 
-        // A. Obtener días de vacaciones usados (de solicitudes aprobadas) para el CICLO ACTUAL
-        // Es crucial que esto sume los días disfrutados DENTRO del ciclo actual.
         $diasVacacionesUsados = Vacaciones::where('empleado_id', $empleado->id)
-            ->where('ciclo_servicio_id', $cicloServicioActual->id) // Sumar solo para el ciclo actual
+            ->where('ciclo_servicio_id', $cicloServicioActual->id)
             ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
             ->sum('dias_vacaciones_solicitados');
 
-
-        // B. Calcular días disponibles REALES antes de la solicitud
-        // Aquí la `vacacionesTotalesAsignadas` ya incluye los arrastrados.
         $diasDisponiblesActuales = $vacacionesTotalesAsignadas - $diasVacacionesUsados;
 
-        // 6. Verificar si hay suficientes días disponibles para esta nueva solicitud
         if ($diasSolicitados > $diasDisponiblesActuales) {
             throw new BusinessException("No hay suficientes días de vacaciones disponibles. Disponibles: {$diasDisponiblesActuales}, Solicitados: {$diasSolicitados}", 403);
         }
 
-        // 7. Agregar campos calculados a los datos
-        $data['dias_vacaciones_totales'] = $vacacionesTotalesAsignadas; // Este ya incluye los arrastrados
-        $data['dias_vacaciones_arrastrados'] = $diasArrastrados; // Asignamos el valor que obtuvimos
-        $data['dias_vacaciones_solicitados'] = $diasSolicitados;
-        $data['dias_vacaciones_disfrutados'] = 0; // Se disfruta cuando se aprueba y se usa (o al final del periodo)
-        $data['dias_vacaciones_disponibles'] = $diasDisponiblesActuales - $diasSolicitados; // Los días que quedarán disponibles si esta solicitud fuera aprobada
+        $dataToCreate = [
+            'empleado_id'               => $empleado->id,
+            'ciclo_servicio_id'         => $cicloServicioActual->id,
+            'dias_vacaciones_totales'   => $vacacionesTotalesAsignadas,
+            'dias_vacaciones_arrastrados' => 0,
+            'dias_vacaciones_disfrutados' => 0,
+            'dias_vacaciones_solicitados' => $diasSolicitados,
+            'dias_vacaciones_disponibles' => $diasDisponiblesActuales - $diasSolicitados,
+            'fecha_solicitud'           => Carbon::now()->startOfDay(),
+            'fecha_inicio'              => $fechaInicio,
+            'fecha_fin'                 => $fechaFin,
+            'observaciones'             => $data['observaciones'] ?? null,
+        ];
 
-        // 8. Establecer la fecha de solicitud a la fecha actual y estado inicial (PENDIENTE)
-        $data['fecha_solicitud'] = Carbon::now();
         $estadoPendiente = EstadoSolicitud::where('estado', 'PENDIENTE')->firstOrFail();
-        $data['estado_solicitud_id'] = $estadoPendiente->id;
-        $data['ciclo_servicio_id'] = $cicloServicioActual->id; // Aseguramos que se usa el ID del ciclo actual
+        $dataToCreate['estado_solicitud_id'] = $estadoPendiente->id;
 
-        // 9. Guardar la solicitud
-        $solicitud = Vacaciones::create($data);
+        $solicitud = Vacaciones::create($dataToCreate);
 
         return ApiResponse::success($solicitud);
     }
 
-    /**
-     * Inicializa el registro de vacaciones para un empleado "nuevo en sistema" pero con historial,
-     * permitiendo asignar días arrastrados manualmente. Este método crea el *primer* registro
-     * de vacaciones para el empleado en el ciclo actual.
-     *
-     * @param array $data Contiene 'empleado_id' y opcionalmente 'dias_vacaciones_arrastrados'.
-     * @return \Illuminate\Http\JsonResponse
-     * @throws EmpleadoNoEncontradoException
-     * @throws BusinessException Si ya existen vacaciones para el empleado en el ciclo actual.
-     */
     public function inicializarVacacionesEmpleadoHistorico(array $data)
     {
-        // 1. Validar si el empleado existe
         $empleado = Empleado::find($data['empleado_id']);
         if (!$empleado) {
             throw new EmpleadoNoEncontradoException('Empleado no encontrado.', 404);
         }
 
-        // 2. Encontrar o crear el ciclo de servicio actual para el empleado
         $cicloServicioActual = CicloServicio::firstOrCreate([
             'empleado_id' => $empleado->id,
             'anio' => now()->year,
         ]);
 
-        // 3. Verificar si ya existe un registro de vacaciones para este empleado y ciclo
         $existingVacacion = Vacaciones::where('empleado_id', $empleado->id)
-                                        ->where('ciclo_servicio_id', $cicloServicioActual->id)
-                                        ->first();
+                                         ->where('ciclo_servicio_id', $cicloServicioActual->id)
+                                         ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'ASIGNADO'))
+                                         ->first();
 
         if ($existingVacacion) {
-            throw new BusinessException('Ya existen vacaciones registradas para este empleado en el ciclo actual. Use el método de actualización si necesita modificar días arrastrados existentes.', 409);
+            throw new BusinessException('Ya existe un registro de asignación de vacaciones para este empleado en el ciclo actual. Use el método de actualización si necesita modificar días arrastrados existentes.', 409);
         }
 
-        // 4. Determinar los días de vacaciones arrastrados (desde la entrada manual, si existe)
         $diasArrastrados = isset($data['dias_vacaciones_arrastrados']) && is_numeric($data['dias_vacaciones_arrastrados'])
             ? (int) $data['dias_vacaciones_arrastrados']
             : 0;
 
-        // 5. Calcular los días base de vacaciones para el ciclo actual (por antigüedad)
+        $diasArrastrados = max(0, $diasArrastrados);
+
         $diasBasePorAntiguedad = $this->calcularDiasBasePorAntiguedad($empleado->id);
 
-        // 6. Calcular el total de días de vacaciones asignados para el ciclo actual
         $diasVacacionesTotales = $diasBasePorAntiguedad + $diasArrastrados;
 
-        // 7. Obtener el estado inicial (PENDIENTE o un estado específico como 'ASIGNADO_INICIAL')
-        // Es recomendable tener un estado claro para estos registros iniciales que no son "solicitudes".
-        $estadoInicial = EstadoSolicitud::where('estado', 'PENDIENTE')->firstOrFail();
+        $estadoAsignado = EstadoSolicitud::where('estado', 'ASIGNADO')->firstOrFail();
 
-        // 8. Crear el registro de Vacaciones
         $vacacionInicial = Vacaciones::create([
-            'empleado_id' => $empleado->id,
-            'ciclo_servicio_id' => $cicloServicioActual->id,
-            'dias_vacaciones_totales' => $diasVacacionesTotales,
+            'empleado_id'               => $empleado->id,
+            'ciclo_servicio_id'         => $cicloServicioActual->id,
+            'dias_vacaciones_totales'   => $diasVacacionesTotales,
             'dias_vacaciones_arrastrados' => $diasArrastrados,
-            'dias_vacaciones_disfrutados' => 0, // Al inicializar, no ha disfrutado días
-            'dias_vacaciones_solicitados' => 0, // No es una solicitud, es una asignación
-            'dias_vacaciones_disponibles' => $diasVacacionesTotales, // Al inicio, disponibles = totales
-            'fecha_solicitud' => Carbon::now(), // Fecha de cuando se crea este registro inicial
-            'fecha_inicio' => null, // No hay fechas de disfrute asociadas a este registro inicial
-            'fecha_fin' => null,
-            'estado_solicitud_id' => $estadoInicial->id,
-            'observaciones' => 'Registro inicial de vacaciones para el ciclo actual, incluyendo días arrastrados de historial manual.',
+            'dias_vacaciones_disfrutados' => 0,
+            'dias_vacaciones_solicitados' => 0,
+            'dias_vacaciones_disponibles' => $diasVacacionesTotales,
+            'fecha_solicitud'           => Carbon::now()->startOfDay(),
+            'fecha_inicio'              => null,
+            'fecha_fin'                 => null,
+            'estado_solicitud_id'       => $estadoAsignado->id,
+            'observaciones'             => 'Registro inicial de vacaciones para el ciclo actual, incluyendo días arrastrados de historial manual.',
         ]);
 
         return ApiResponse::success($vacacionInicial);
     }
-
-
 
     private function calcularDiasLaborables(Carbon $inicio, Carbon $fin, string $tipoContrato): int
     {
@@ -218,16 +213,14 @@ class VacacionesService
             $diaSemana = $current->dayOfWeek; // 0 = domingo, 6 = sábado
 
             if ($tipoContrato === 'TIEMPO_COMPLETO') {
-                $dias++; // cuenta todos los días
+                $dias++;
             } else {
                 if ($diaSemana >= 1 && $diaSemana <= 5) {
-                    $dias++; // solo lunes a viernes
+                    $dias++;
                 }
             }
-
             $current->addDay();
         }
-
         return $dias;
     }
 
@@ -238,184 +231,272 @@ class VacacionesService
         if (strtoupper($solicitud->estadoSolicitud->estado) === 'APROBADO') {
             throw new BusinessException('No se puede editar una solicitud aprobada.', 403);
         }
+        // Se añade verificación para estados CANCELADO y RECHAZADO, ya que no deberían ser editables
+        if (strtoupper($solicitud->estadoSolicitud->estado) === 'CANCELADO' || strtoupper($solicitud->estadoSolicitud->estado) === 'RECHAZADO') {
+            throw new BusinessException('No se puede editar una solicitud que ha sido cancelada o rechazada.', 403);
+        }
 
-        $fechaInicio = Carbon::parse($data['fecha_inicio']);
-        $fechaFin = Carbon::parse($data['fecha_fin']);
-        $diasSolicitados = $this->calcularDiasLaborables($fechaInicio, $fechaFin, $solicitud->empleado->tipo_contrato);
+        // Si se están actualizando las fechas, recalcular los días solicitados
+        if (isset($data['fecha_inicio']) || isset($data['fecha_fin'])) {
+            $fechaInicio = Carbon::parse($data['fecha_inicio'] ?? $solicitud->fecha_inicio)->startOfDay();
+            $fechaFin = Carbon::parse($data['fecha_fin'] ?? $solicitud->fecha_fin)->startOfDay();
 
-        $solicitud->update(array_merge($data, [
-            'dias_vacaciones_solicitados' => $diasSolicitados
-        ]));
+            if ($fechaInicio->isAfter($fechaFin)) {
+                throw new BusinessException('La fecha de inicio no puede ser posterior a la fecha de fin.', 400);
+            }
+
+            $diasSolicitados = $this->calcularDiasLaborables($fechaInicio, $fechaFin, $solicitud->empleado->tipo_contrato);
+            $data['dias_vacaciones_solicitados'] = $diasSolicitados;
+            $data['fecha_inicio'] = $fechaInicio;
+            $data['fecha_fin'] = $fechaFin;
+            // --- INICIO: VALIDACIÓN DE MÁXIMO DE UNA SEMANA EN UPDATE ---
+            // Asegurarse de que al actualizar, la duración siga siendo <= 7 días
+            $MAX_DIAS_VACACIONES = 7;
+            if ($diasSolicitados > $MAX_DIAS_VACACIONES) {
+                throw new BusinessException("No se pueden solicitar más de {$MAX_DIAS_VACACIONES} días de vacaciones. Por favor, ajuste el período solicitado.", 400);
+            }
+            // --- FIN: VALIDACIÓN DE MÁXIMO DE UNA SEMANA EN UPDATE ---
+        }
+
+        unset($data['dias_vacaciones_totales']);
+        unset($data['dias_vacaciones_arrastrados']);
+        unset($data['dias_vacaciones_disfrutados']);
+        unset($data['dias_vacaciones_disponibles']);
+        unset($data['estado_solicitud_id']); // El estado se cambia con cambiarEstado()
+
+        $solicitud->update($data);
 
         return ApiResponse::success($solicitud->fresh());
     }
 
-
-    /**
-     * Si quieres ir más allá, podríamos:
-     * ✨ Mostrar explícitamente qué días se omiten en la interfaz.
-     * 🔒 Evitar duplicadas para el mismo periodo de un empleado.
-     * 🧠 Añadir lógica para días festivos, si tu empresa tiene un calendario oficial.
-     * ¿Te gustaría alguna de esas mejoras o con esto estamos listos por ahora?
-     *
-     */
-
-
     public function delete($id)
     {
-        $solicitud = Vacaciones::findOrFail($id); // Usamos findOrFail para lanzar una excepción si no se encuentra
+        $solicitud = Vacaciones::findOrFail($id);
 
-        if (strtoupper($solicitud->estadoSolicitud->estado) === 'APROBADO') {
-            throw new BusinessException('No se puede eliminar una solicitud aprobada.', 403);
+        // No permitir eliminar si está APROBADO, PENDIENTE
+        if (in_array(strtoupper($solicitud->estadoSolicitud->estado), ['APROBADO', 'PENDIENTE'])) {
+            throw new BusinessException('No se puede eliminar una solicitud que ya ha sido procesada (Aprobada, Pendiente).', 403);
         }
 
         $solicitud->delete();
         return ApiResponse::success(['message' => 'Solicitud eliminada correctamente.']);
     }
 
-    // ─────────────── 2. CAMBIO DE ESTADO ───────────────
-
-    public function aprobarSolicitud($id)   { return $this->cambiarEstado($id, 'APROBADO'); }
-    public function rechazarSolicitud($id)  { return $this->cambiarEstado($id, 'RECHAZADO'); }
-    public function cancelarSolicitud($id)  { return $this->cambiarEstado($id, 'CANCELADO'); }
 
     /**
-     * Cambia el estado de la solicitud de vacaciones.
+     * Consulta la disponibilidad de vacaciones para un período, departamento y tipo de contrato.
      *
-     * @param int $id
-     * @param string $estadoNombre
-     * @throws BusinessException
-     * @return \Illuminate\Http\Response
+     * @param \Illuminate\Http\Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
+    public function consultarDisponibilidad(Request $request)
+    {
+        try {
+            $request->validate([
+                'fecha_inicio'      => 'required|date_format:Y-m-d',
+                'fecha_fin'         => 'required|date_format:Y-m-d|after_or_equal:fecha_inicio',
+                'departamento_id'   => 'required|integer|exists:departamentos,id',
+                'tipo_contrato'     => ['required', 'string', Rule::in(['TIEMPO_COMPLETO', 'MEDIO_TIEMPO'])], // Ajusta según tus tipos
+                'limite_empleados_por_dia' => 'sometimes|integer|min:1', // Opcional, por defecto 5
+            ]);
+
+            $fechaInicio = $request->input('fecha_inicio');
+            $fechaFin = $request->input('fecha_fin');
+            $departamentoId = $request->input('departamento_id');
+            $tipoContrato = $request->input('tipo_contrato');
+            $limiteEmpleadosPorDia = $request->input('limite_empleados_por_dia', 5); // Por defecto 5
+
+            $data = $this->vacacionesService->consultarDisponibilidadVacaciones(
+                $fechaInicio,
+                $fechaFin,
+                $departamentoId,
+                $tipoContrato,
+                $limiteEmpleadosPorDia
+            );
+
+            return ApiResponse::success($data, 'Consulta de disponibilidad realizada con éxito.');
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return ApiResponse::error('Errores de validación: ' . $e->getMessage(), 422, $e->errors());
+        } catch (BusinessException $e) {
+            return ApiResponse::error($e->getMessage(), $e->getCode());
+        } catch (\Exception $e) {
+            \Log::error("Error al consultar disponibilidad de vacaciones: " . $e->getMessage(), ['exception' => $e]);
+            return ApiResponse::error('Ocurrió un error inesperado al consultar la disponibilidad.', 500);
+        }
+    }
+
+
+
+    public function aprobarSolicitud($id) { return $this->cambiarEstado($id, 'APROBADO'); }
+    public function rechazarSolicitud($id) { return $this->cambiarEstado($id, 'RECHAZADO'); }
+    public function cancelarSolicitud($id) { return $this->cambiarEstado($id, 'CANCELADO'); }
+
     public function cambiarEstado($id, string $estadoNombre)
     {
-        $solicitud = Vacaciones::findOrFail($id); // Usamos findOrFail para lanzar una excepción si no se encuentra
+        $solicitud = Vacaciones::findOrFail($id);
 
-        // Verificar que el estado no sea 'APROBADO' si ya fue aprobado.
-        if (strtoupper($estadoNombre) === 'CANCELADO' && strtoupper($solicitud->estadoSolicitud->estado) === 'APROBADO') {
-            throw new BusinessException('No se puede cancelar una solicitud aprobada.');
+        $estadoActual = strtoupper($solicitud->estadoSolicitud->estado);
+        $nuevoEstado = strtoupper($estadoNombre);
+
+        // Si ya está en el estado deseado, no hacer nada.
+        if ($estadoActual === $nuevoEstado) {
+            return ApiResponse::success($solicitud->fresh(), "La solicitud ya se encuentra en estado {$nuevoEstado}.");
         }
 
-        if (strtoupper($estadoNombre) === 'RECHAZADO' && strtoupper($solicitud->estadoSolicitud->estado) === 'APROBADO') {
-            throw new BusinessException('No se puede rechazar una solicitud ya aprobada.');
+        // Reglas de transición de estado
+        switch ($estadoActual) {
+            case 'ASIGNADO':
+                // 'ASIGNADO' no es una solicitud de vacaciones, es el balance.
+                // No debería ser modificable a APROBADO/RECHAZADO/CANCELADO.
+                // Si se desea modificar 'dias_vacaciones_arrastrados' o 'dias_vacaciones_totales'
+                // de un registro ASIGNADO, debe ser con un método dedicado para eso.
+                throw new BusinessException('El registro de vacaciones "ASIGNADO" no se puede cambiar de estado de esta manera. Representa el balance anual del empleado.', 403);
+                break;
+
+            case 'APROBADO':
+                // Una solicitud APROBADA no puede cambiar a ningún otro estado.
+                throw new BusinessException('Una solicitud APROBADA no puede cambiar de estado.', 403);
+                break;
+
+            case 'RECHAZADO':
+            case 'CANCELADO':
+                // Una solicitud RECHAZADA o CANCELADA no puede cambiar a ningún otro estado.
+                throw new BusinessException("Una solicitud {$estadoActual} no puede cambiar de estado.", 403);
+                break;
+
+            case 'PENDIENTE':
+                // Desde PENDIENTE, se puede pasar a APROBADO, CANCELADO, RECHAZADO.
+                if (!in_array($nuevoEstado, ['APROBADO', 'CANCELADO', 'RECHAZADO'])) {
+                    throw new BusinessException("El estado 'PENDIENTE' solo puede pasar a 'APROBADO', 'CANCELADO' o 'RECHAZADO'.", 400);
+                }
+                break;
+
+            default:
+                // Cualquier otro estado no previsto
+                throw new BusinessException('Transición de estado no permitida para el estado actual.', 400);
         }
 
-        // Obtener el estado
-        $estado = EstadoSolicitud::where('estado', strtoupper($estadoNombre))->firstOrFail(); // Usamos firstOrFail para lanzar una excepción si no se encuentra
+        $estadoObj = EstadoSolicitud::where('estado', $nuevoEstado)->firstOrFail();
 
-        // Actualizar el estado de la solicitud
-        $solicitud->update([
-            'estado_solicitud_id' => $estado->id,
-            'fecha_aprobacion' => now()
-        ]);
+        DB::beginTransaction();
+        try {
+            $updateData = [
+                'estado_solicitud_id' => $estadoObj->id,
+            ];
 
-        return ApiResponse::success($solicitud->fresh());
+            // Ajustar los días disfrutados y solicitados de la solicitud específica
+            if ($nuevoEstado === 'APROBADO') {
+                $updateData['dias_vacaciones_disfrutados'] = $solicitud->dias_vacaciones_solicitados;
+                $updateData['fecha_aprobacion'] = Carbon::now()->startOfDay();
+            } elseif (in_array($nuevoEstado, ['RECHAZADO', 'CANCELADO'])) {
+                // Si se rechaza o cancela una solicitud PENDIENTE, se reinician los días disfrutados y solicitados
+                // de este registro de solicitud, ya que no se tomarán.
+                $updateData['dias_vacaciones_disfrutados'] = 0;
+                $updateData['dias_vacaciones_solicitados'] = 0; // Reinicia los días solicitados para este registro.
+                $updateData['fecha_aprobacion'] = null; // Limpiar fecha de aprobación si no se aprueba
+            } else {
+                $updateData['fecha_aprobacion'] = null; // Default a null si no es aprobado
+            }
+
+            $solicitud->update($updateData);
+
+            // Importante: La lógica de actualización del saldo (dias_vacaciones_disponibles)
+            // se maneja en el registro de tipo 'ASIGNADO', no en la solicitud individual.
+            // Para asegurar que el `getDisponibilidad` siempre sea correcto,
+            // no es necesario actualizar el campo `dias_vacaciones_disponibles` en cada solicitud individual.
+            // Ese campo es un "snapshot" de la disponibilidad al momento de la creación de la solicitud.
+            // La disponibilidad actual siempre se recalcula dinámicamente en `getDisponibilidad`.
+
+            DB::commit();
+            return ApiResponse::success($solicitud->fresh(), "Estado de la solicitud cambiado a {$nuevoEstado} correctamente.");
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            throw new BusinessException('Error al cambiar el estado de la solicitud: ' . $e->getMessage(), 500);
+        }
     }
 
     // ───────────────────── 3. FILTROS ─────────────────────
 
     public function getByEmpleado($empleadoId)
     {
-        //añadimos datos dedl empleado y estado de solicitud y ademas su datos del empleado
         $empleado = Empleado::find($empleadoId);
         if (!$empleado) {
             throw new EmpleadoNoEncontradoException('Empleado no encontrado.', 404);
         }
 
-        //exite vacione con empleado_id
-        if (!Vacaciones::where('empleado_id', $empleadoId)->exists()) {
-            throw new VacacionNoEncontradaException('No se encontraron vacaciones para este empleado.', 404);
-        }
+        $data = Vacaciones::with('estadoSolicitud', 'cicloServicio')
+            ->where('empleado_id', $empleadoId)
+            ->get();
 
-        $data = Vacaciones::with('estadoSolicitud')
-                ->where('empleado_id', $empleadoId)
-                ->get();
-
-
-        return ApiResponse::success( $data );
+        return ApiResponse::success($data);
     }
 
     public function getPorEstado($estadoId)
     {
         return ApiResponse::success(
-            Vacaciones::where('estado_solicitud_id', $estadoId)->get()
+            Vacaciones::with('empleado', 'estadoSolicitud', 'cicloServicio')
+                ->where('estado_solicitud_id', $estadoId)
+                ->get()
         );
     }
 
     public function getPendientes()
     {
-        // Verificar si el estado "PENDIENTE" realmente existe antes de continuar
         $estado = EstadoSolicitud::where('estado', 'PENDIENTE')->first();
 
         if (!$estado) {
-            //lanzar una excepción si no se encuentra el estado
-            throw new EstadoSolicitudNoEncontradoException('El estado PENDIENTE no fue encontrado en estados_solicitud.', 404);
+            throw new BusinessException('El estado PENDIENTE no fue encontrado en estados_solicitud. Asegúrate de que los estados básicos existan en tu base de datos.', 404);
         }
 
-        // Convertir el ID a número explícitamente
-        $estadoId = (int) $estado->id;
-
-        // Log para verificar que la consulta fue exitosa
-        \Log::info('Obteniendo solicitudes de vacaciones pendientes con estado ID: ' . $estadoId);
-
-        // Obtener solicitudes pendientes con información adicional
-        $data = Vacaciones::with('empleado', 'estadoSolicitud')
-            ->where('estado_solicitud_id', $estadoId)
+        $data = Vacaciones::with('empleado', 'estadoSolicitud', 'cicloServicio')
+            ->where('estado_solicitud_id', $estado->id)
             ->get();
 
-        // Manejar el caso en el que no haya solicitudes pendientes
         if ($data->isEmpty()) {
-            $data = [
-                'message' => 'No hay solicitudes de vacaciones pendientes.'
-            ];
+            return ApiResponse::success([], 'No hay solicitudes de vacaciones pendientes.');
         }
 
         return ApiResponse::success($data);
     }
 
-/**
-     * Obtiene el reporte de vacaciones por periodo.
-     */
     public function getPorPeriodo(string $desde, string $hasta): array
     {
-
-
-        // Validar las fechas de entrada no son nulas o vacías
         if (empty($desde) || empty($hasta)) {
-            throw new BusinessException('Las fechas de inicio y fin no pueden estar vacías.');
+            throw new BusinessException('Las fechas de inicio y fin no pueden estar vacías.', 400);
         }
 
-
-
-        // Validar las fechas de entrada
         if (!Carbon::hasFormat($desde, 'Y-m-d') || !Carbon::hasFormat($hasta, 'Y-m-d')) {
-            throw new BusinessException('Las fechas deben estar en formato Y-m-d.');
+            throw new BusinessException('Las fechas deben estar en formato Y-m-d.', 400);
         }
-
 
         $desde = Carbon::parse($desde)->startOfDay();
         $hasta = Carbon::parse($hasta)->endOfDay();
-        // Verificar que la fecha de inicio no sea posterior a la fecha de fin
+
         if ($desde->isAfter($hasta)) {
-            throw new BusinessException('La fecha de inicio no puede ser posterior a la fecha de fin.');
+            throw new BusinessException('La fecha de inicio no puede ser posterior a la fecha de fin.', 400);
         }
 
-        //este metodo retorna ddatos de vacaiones de inifo y fn de las vcacaiones no de unr rgnoen las que fueron creadas
-        $vacaciones = Vacaciones::whereBetween('fecha_inicio', [$desde, $hasta])
+        $vacaciones = Vacaciones::whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
+            ->where(function($query) use ($desde, $hasta) {
+                $query->whereDate('fecha_inicio', '<=', $hasta->toDateString())
+                      ->whereDate('fecha_fin', '>=', $desde->toDateString());
+            })
             ->with(['empleado', 'estadoSolicitud', 'cicloServicio'])
             ->get();
 
         return $vacaciones->toArray();
     }
 
-    // ─────────────── 4. UTILIDADES Y DISPONIBILIDAD ───────────────
+    // ─────────────────────── 4. UTILIDADES Y DISPONIBILIDAD ───────────────────────
 
- // Renombramos calcularVacacionesTotales a calcularDiasBasePorAntiguedad
-    // para mayor claridad, ya que ahora el "total" es la suma de base + arrastrados.
-    public function calcularDiasBasePorAntiguedad($empleadoId)
+    public function calcularDiasBasePorAntiguedad(int $empleadoId): int
     {
         $empleado = Empleado::find($empleadoId);
-        if (!$empleado) return 0;
+        if (!$empleado) {
+            throw new EmpleadoNoEncontradoException('Empleado no encontrado al calcular días por antigüedad.', 404);
+        }
 
         $antiguedad = Carbon::parse($empleado->fecha_ingreso)->diffInYears(now());
 
@@ -425,121 +506,110 @@ class VacacionesService
         return $registro->dias_vacaciones ?? 0;
     }
 
-    // Actualizamos getDisponibilidad para considerar los días arrastrados
-    public function getDisponibilidad($empleadoId)
+    public function getDiasArrastradosDelCicloAnterior(int $empleadoId, int $anioActual): int
+    {
+        $anioAnterior = $anioActual - 1;
+
+        $cicloAnterior = CicloServicio::where('empleado_id', $empleadoId)
+                                     ->where('anio', $anioAnterior)
+                                     ->first();
+
+        $diasDisponiblesAnioAnterior = 0;
+        if ($cicloAnterior) {
+            $vacacionAsignadaAnioAnterior = Vacaciones::where('empleado_id', $empleadoId)
+                                                      ->where('ciclo_servicio_id', $cicloAnterior->id)
+                                                      ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'ASIGNADO'))
+                                                      ->first();
+
+            if ($vacacionAsignadaAnioAnterior) {
+                $diasUsadosAnioAnterior = Vacaciones::where('empleado_id', $empleadoId)
+                                                    ->where('ciclo_servicio_id', $cicloAnterior->id)
+                                                    ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
+                                                    ->sum('dias_vacaciones_solicitados');
+
+                $diasDisponiblesAnioAnterior = ($vacacionAsignadaAnioAnterior->dias_vacaciones_totales) - $diasUsadosAnioAnterior;
+
+                if ($diasDisponiblesAnioAnterior < 0) {
+                    $diasDisponiblesAnioAnterior = 0;
+                }
+            }
+        }
+        return $diasDisponiblesAnioAnterior;
+    }
+
+    public function getDisponibilidad(int $empleadoId)
     {
         $empleado = Empleado::findOrFail($empleadoId);
 
-        // Obtener el ciclo de servicio actual del empleado
-        $cicloServicioActual = CicloServicio::where('empleado_id', $empleadoId)
-                                            ->where('anio', now()->year)
-                                            ->first();
+        $cicloServicioActual = CicloServicio::firstOrCreate([
+            'empleado_id' => $empleadoId,
+            'anio' => now()->year,
+        ]);
 
         $diasBase = $this->calcularDiasBasePorAntiguedad($empleadoId);
         $diasArrastrados = 0;
         $diasUsados = 0;
 
-        if ($cicloServicioActual) {
-            // Obtener el registro de Vacaciones (el primero) para el ciclo actual
-            $vacacionCicloActual = Vacaciones::where('empleado_id', $empleadoId)
-                                            ->where('ciclo_servicio_id', $cicloServicioActual->id)
-                                            ->first(); // Solo el primer registro que lleva los arrastrados
+        $vacacionAsignadaCicloActual = Vacaciones::where('empleado_id', $empleadoId)
+                                                ->where('ciclo_servicio_id', $cicloServicioActual->id)
+                                                ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'ASIGNADO'))
+                                                ->first();
 
-            if ($vacacionCicloActual) {
-                $diasArrastrados = $vacacionCicloActual->dias_vacaciones_arrastrados;
-            }
-
-            // Sumar los días solicitados aprobados para el ciclo actual
-            $diasUsados = Vacaciones::where('empleado_id', $empleadoId)
-                                    ->where('ciclo_servicio_id', $cicloServicioActual->id)
-                                    ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
-                                    ->sum('dias_vacaciones_solicitados');
+        if ($vacacionAsignadaCicloActual) {
+            $diasArrastrados = $vacacionAsignadaCicloActual->dias_vacaciones_arrastrados;
         }
 
-        // El total asignado ahora es la suma de los días base y los días arrastrados
+        $diasUsados = Vacaciones::where('empleado_id', $empleadoId)
+                                ->where('ciclo_servicio_id', $cicloServicioActual->id)
+                                ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
+                                ->sum('dias_vacaciones_solicitados');
+
         $totalAsignado = $diasBase + $diasArrastrados;
         $disponible = $totalAsignado - $diasUsados;
 
-
         return ApiResponse::success([
-            'empleado' => $empleado->getFullName(),
-            'total_base_por_antiguedad' => $diasBase, // Puedes mostrar esto para claridad
-            'dias_arrastrados' => $diasArrastrados, // Mostrar el nuevo campo
-            'total_asignado' => $totalAsignado,
-            'usado' => $diasUsados,
-            'disponible' => $disponible,
+            'empleado'                  => $empleado->getFullName(),
+            'total_base_por_antiguedad' => $diasBase,
+            'dias_arrastrados'          => $diasArrastrados,
+            'total_asignado'            => $totalAsignado,
+            'usado'                     => $diasUsados,
+            'disponible'                => $disponible,
         ]);
     }
 
-/**
-     * Obtiene las vacaciones aprobadas por empleado y ciclo, cargando sus relaciones.
-     *
-     * @param int $empleadoId
-     * @param string $ciclo Puede ser un año o un identificador del ciclo.
-     * @return array
-     */
-    public function getVacacionesAprobadasPorEmpleadoYCiclo(int $empleadoId, string $ciclo): array
+    public function getVacacionesAprobadasPorEmpleadoYCiclo(int $empleadoId, int $anio): array
     {
-        // Asumiendo que 'ciclo' corresponde al 'nombre_ciclo' en la tabla 'ciclo_servicios'
-        // o al año si tu lógica de ciclo lo maneja así.
-        // Si 'ciclo' es un año (ej. "2024"), podrías buscar por el año en la relación.
-        // Aquí usaré la relación con 'cicloServicio' y su columna 'nombre_ciclo'.
-        // Si tu columna es diferente, ajusta 'nombre_ciclo'.
-
         $data = Vacaciones::where('empleado_id', $empleadoId)
-            // Aseguramos que solo tomamos las solicitudes APROBADAS
-            ->whereHas('estadoSolicitud', function ($query) {
-                $query->whereIn('estado', ['APROBADO', 'PENDIENTE']);//cambiar a pendientes----------------------------------------------------
-            })
-            // Filtramos por el ciclo de servicio. Necesitas que 'ciclo_servicio' sea una relación
-            // y que el valor de $ciclo corresponda a una columna en esa tabla (ej. 'nombre_ciclo').
-            ->whereHas('cicloServicio', function ($query) use ($ciclo) {
-                $query->where('anio', $ciclo);
-            })
-            // ¡Importante! Cargar las relaciones necesarias para la vista Blade
+            ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
+            ->whereHas('cicloServicio', fn($q) => $q->where('anio', $anio))
             ->with(['empleado', 'estadoSolicitud', 'cicloServicio'])
             ->get();
 
-           // dd($data); // Para depurar y ver los datos obtenidos
-
-        return $data->toArray(); // Aseguramos que la respuesta sea un array para la vista
+        return $data->toArray();
     }
-
 
     // ───────────────────── 5. REPORTES ─────────────────────
 
     public function reporteResumen()
     {
-        try {
-            // Obtener los datos
-            $total = Vacaciones::count();
-            $aprobadas = Vacaciones::whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))->count();
-            $rechazadas = Vacaciones::whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'RECHAZADO'))->count();
-            $pendientes = Vacaciones::whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'PENDIENTE'))->count();
+        $estadoAprobadoId = EstadoSolicitud::where('estado', 'APROBADO')->first()->id ?? null;
+        $estadoRechazadoId = EstadoSolicitud::where('estado', 'RECHAZADO')->first()->id ?? null;
+        $estadoPendienteId = EstadoSolicitud::where('estado', 'PENDIENTE')->first()->id ?? null;
+        $estadoCanceladoId = EstadoSolicitud::where('estado', 'CANCELADO')->first()->id ?? null;
+        $estadoAsignadoId = EstadoSolicitud::where('estado', 'ASIGNADO')->first()->id ?? null;
 
-            // Comprobar que los datos son válidos y están en el formato correcto
-            $data = [
-                [
-                    'total' => $total,
-                    'aprobadas' => $aprobadas,
-                    'rechazadas' => $rechazadas,
-                    'pendientes' => $pendientes
-                ]
-            ];
+        $counts = [
+            'total'          => Vacaciones::count(),
+            'aprobadas'      => $estadoAprobadoId ? Vacaciones::where('estado_solicitud_id', $estadoAprobadoId)->count() : 0,
+            'rechazadas'     => $estadoRechazadoId ? Vacaciones::where('estado_solicitud_id', $estadoRechazadoId)->count() : 0,
+            'pendientes'     => $estadoPendienteId ? Vacaciones::where('estado_solicitud_id', $estadoPendienteId)->count() : 0,
+            'canceladas'     => $estadoCanceladoId ? Vacaciones::where('estado_solicitud_id', $estadoCanceladoId)->count() : 0,
+            'asignadas'      => $estadoAsignadoId ? Vacaciones::where('estado_solicitud_id', $estadoAsignadoId)->count() : 0,
+            'no_solicitadas' => 0
+        ];
 
-            // Validación: Verificar que $data sea un array indexado
-            if (!is_array($data) || empty($data) || !isset($data[0]) || !is_array($data[0])) {
-                throw new \Exception('Los datos generados no tienen el formato esperado.');
-            }
-
-            return $data;  // Retornar los datos si todo está correcto
-
-        } catch (\Exception $e) {
-            // Lanza la excepción para que se maneje en el controlador
-            throw new \Exception('Error en la generación del reporte: ' . $e->getMessage());
-        }
+        return [$counts];
     }
-
 
     public function reporteTopEmpleados($limit = 5)
     {
@@ -551,18 +621,13 @@ class VacacionesService
             ->limit($limit)
             ->get();
 
-
         return $top->toArray();
     }
 
-/**
-     * Reporte de vacaciones por departamento.
-     * Asegúrate de que el modelo Empleado tenga la relación 'departamento'.
-     */
     public function reportePorDepartamento(int $departamentoId)
     {
         $vacaciones = Vacaciones::with([
-                'empleado.departamento', // Carga el empleado y su departamento
+                'empleado.departamento',
                 'estadoSolicitud',
                 'cicloServicio'
             ])
@@ -572,36 +637,25 @@ class VacacionesService
         return $vacaciones->toArray();
     }
 
-    public function reporteDiasTomadosPorMes($año)
+    public function reporteDiasTomadosPorMes(int $anio)
     {
         $datos = Vacaciones::selectRaw('MONTH(fecha_inicio) as mes, SUM(dias_vacaciones_solicitados) as total')
-            ->whereYear('fecha_inicio', $año)
+            ->whereYear('fecha_inicio', $anio)
             ->whereHas('estadoSolicitud', fn($q) => $q->whereIn('estado', ['APROBADO']))
             ->groupByRaw('MONTH(fecha_inicio)')
             ->orderByRaw('MONTH(fecha_inicio)')
             ->get();
-
         return $datos->toArray();
     }
 
-    // Este método genera un reporte de los días tomados por semana
-    // en un año específico. Se utiliza la función WEEK para agrupar
-    // los días por semana y se suman los días de vacaciones solicitados.
-    // El resultado se ordena por semana.
-    // Se espera que el año sea un entero válido.
-    // El método devuelve una respuesta exitosa con los datos obtenidos.
-    // Si no se encuentra ningún dato, se devuelve un mensaje de error.
-    public function reporteDiasPorSemana($año)
+    public function reporteDiasPorSemana(int $anio)
     {
         $datos = Vacaciones::selectRaw('DATEPART(week, fecha_inicio) as semana, SUM(dias_vacaciones_solicitados) as total')
-        ->whereYear('fecha_inicio', $año)
-        ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
-        ->groupBy(DB::raw('DATEPART(week, fecha_inicio)')) // Agrupar por semana usando DATEPART
-        ->orderBy('semana')
-        ->get();
-
+            ->whereYear('fecha_inicio', $anio)
+            ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
+            ->groupBy(DB::raw('DATEPART(week, fecha_inicio)'))
+            ->orderBy('semana')
+            ->get();
         return $datos->toArray();
     }
-
-
 }

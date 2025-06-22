@@ -17,6 +17,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | API Information
+    |--------------------------------------------------------------------------
+    |
+    | This array contains general information about your API,
+    | such as its version, description, and contact details.
+    |
+    */
+    'api_info' => [
+        'name'          => env('APP_NAME'), // Reutilizamos APP_NAME como el nombre de la API
+        'version'       => env('API_VERSION', '1.0.0'),
+        'description'   => env('API_DESCRIPTION', 'API para la gestión integral de vacaciones.'),
+        'contact_email' => env('API_CONTACT_EMAIL', 'contacto@ejemplo.com'),
+        'contact_phone' => env('API_CONTACT_PHONE', null),
+        'support_url'   => env('API_SUPPORT_URL', null),
+        'collaborators' => [
+            ['name' => 'El Equipo INISIP', 'role' => 'Desarrollo y Soporte'],
+            // Puedes añadir más colaboradores aquí directamente en el código
+            // o cargar de una base de datos si la lista es dinámica.
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Environment
     |--------------------------------------------------------------------------
     |
@@ -122,5 +145,6 @@ return [
         'driver' => env('APP_MAINTENANCE_DRIVER', 'file'),
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
+
 
 ];

@@ -2,6 +2,8 @@
 
 use Illuminate\Support\Facades\Route;
 
+use App\Http\Controllers\ApiController;
+
 use App\Http\Controllers\Api\Asistencias\TipoAsistenciaController;
 use App\Http\Controllers\Api\Departamentos\DepartamentoController;
 use App\Http\Controllers\Api\Vacaciones\EstadoSolicitudController;
@@ -21,6 +23,13 @@ use App\Http\Controllers\Api\Vacaciones\VacacionesController;
 // se confunda con el nombre de la ruta y el controlador lanze un error/excepción
 // y no se confunda con el nombre de la ruta y el controlador
 Route::middleware('api')->group(function () {
+
+
+
+//---------------- section de la API ------------------
+    Route::get('/info', [ApiController::class, 'info']);
+    Route::get('/version', [ApiController::class, 'info']); // Alias para info
+
 
     // Rutas para Tipos de Asistencia
     Route::prefix('tipos-asistencia')->group(function () {
@@ -139,6 +148,11 @@ Route::middleware('api')->group(function () {
         Route::get('/disponibilidad/{empleadoId}', [VacacionesController::class, 'getDisponibilidad']);
         // ¡NUEVA RUTA para inicializar vacaciones históricas!
     Route::post('/inicializar-historico', [VacacionesController::class, 'inicializarVacacionesHistoricas']);
+// Nueva ruta para consultar disponibilidad
+        Route::get('/consultar-disponibilidad', [VacacionesController::class, 'consultarDisponibilidad']);
+
+
+
     });
 
     Route::prefix('reporte-vacaciones')->group(function() {
@@ -164,10 +178,8 @@ Route::middleware('api')->group(function () {
         // Ejemplo de uso: /api/reporte-vacaciones/top-empleados?limit=10
         Route::get('/top-empleados', [ReporteVacacionesController::class, 'porTopEmpleados']);
 
-
-
-
     });
+
 
 });
 

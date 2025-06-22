@@ -45,6 +45,17 @@ class EmpleadoService
             throw new EmpleadoExistenteException("Ya existe un empleado con esos datos.");
         }
 
+        // Validar que el departamento exista
+        if (!Departamento::where('id', $data['departamento_id'])->exists()) {
+            throw new EmpleadoNoEncontradoException("El departamento especificado no existe.");
+        }
+
+        //validar que el status sea activo o inactivo
+        if (!in_array($data['status'], ['ACTIVO', 'INACTIVO'])) {
+            return ApiResponse::error('Status inválido. Solo se permite ACTIVO o INACTIVO.', 422);
+        }
+
+
         $empleado = Empleado::create($data);
         return ApiResponse::success($empleado->fresh());
     }
