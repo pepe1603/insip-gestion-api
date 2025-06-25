@@ -40,4 +40,6 @@ class ApiController extends Controller
             'message'               => 'Bienvenido a la API de Gestión de Vacaciones.',
         ]);
     }
+
+
 }

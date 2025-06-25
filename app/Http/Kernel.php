@@ -43,7 +43,9 @@ class Kernel extends HttpKernel
         ],
 
         'api' => [
-            \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
+           // \App\Http\Middleware\EnsureJsonResponse::class, //-> este era el erro de ErroConfuse_ del que crasheaba el setgvidor y nod ejaba realziar solicitudes.
+            //\Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class, //solo si usamos Sanctum para spa/SSR, no para tokens puros
+            'throttle:api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ],
     ];

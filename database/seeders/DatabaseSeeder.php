@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\User;
 // use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
+use Database\Seeders\UserSender;
 
 class DatabaseSeeder extends Seeder
 {
@@ -20,6 +21,7 @@ class DatabaseSeeder extends Seeder
             DepartamentoSeeder::class, // <-- Agregar mas seeders
             EstadoSolicitudSeeder::class,
             VacacionesOficialesSeeder::class,
+            UserSeeder::class,
         ]);
 
         // User::factory(10)->create();

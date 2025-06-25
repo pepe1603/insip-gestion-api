@@ -62,6 +62,10 @@ class EmpleadoObserver
                 'anio' => $hoy->year, // El año en que se cumple el aniversario
             ]);
 
+            // Verificar si ya existe un registro de vacaciones ASIGNADO para este ciclo
+            // Esto asegura que no se creen múltiples registros de vacaciones para el mismo ciclo.
+            // Usamos whereHas para filtrar por el estado 'ASIGNADO' y evitar duplicados.
+            // Si no existe, procedemos a crear el registro de vacaciones.
             $existingAssignedRecord = Vacaciones::where('empleado_id', $empleado->id)
                                                 ->where('ciclo_servicio_id', $cicloActual->id)
                                                 ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'ASIGNADO'))

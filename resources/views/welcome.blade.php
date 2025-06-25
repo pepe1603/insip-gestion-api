@@ -9,6 +9,11 @@
     @vite(['resources/css/app.css'])  <!-- Aquí se carga el archivo JS de Vue -->
 </head>
 <body>
-    <div id="app">    </div>  <!-- Vue montará la aplicación aquí -->
+    <div class="container mx-auto border border-gray-200 rounded-b-lg rounded-br-lg p-4 text-center text-gray-600 hover:shadow">
+        <h1 class="font-semibold text-xl mb-4 text-black">Hola, Bienvenido a esta API</h1>
+        <p class="text-base mb-1">Lorem, ipsum dolor sit amet consectetur adipisicing elit. Rerum, nihil optio? Perspiciatis ullam dicta odio.</p>
+        <span class="text-blue-500 hover:underline ">click here to redirect App-web</span>
+    </div>
+  <!-- Vue montará la aplicación aquí -->
 </body>
 </html>
