@@ -3,9 +3,11 @@
 namespace App\Http\Middleware;
 
 use Illuminate\Http\Request;
+use App\Exceptions\AuthTokenException;
 use Illuminate\Auth\AuthenticationException;
+use Symfony\Component\HttpFoundation\Response;
 use Illuminate\Auth\Middleware\Authenticate as Middleware;
-use Symfony\Component\HttpFoundation\Response; // Asegúrate de importar Response
+
 
 class Authenticate extends Middleware
 {
@@ -32,6 +34,26 @@ class Authenticate extends Middleware
     }
 
     /**
+     * Handle an incoming request.
+     * Añadimos un dd() aquí para confirmar si este middleware se está ejecutando.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  \Closure  $next
+     * @param  string  ...$guards
+     * @return mixed
+     * @throws \Illuminate\Auth\AuthenticationException
+     */
+    public function handle($request, Closure $next, ...$guards)
+    {
+        // --- ¡AÑADE ESTO TEMPORALMENTE! ---
+        dd('Executing App\Http\Middleware\Authenticate handle method');
+        // ------------------------------------
+
+        return parent::handle($request, $next, ...$guards);
+    }
+
+
+    /**
      * Handle an unauthenticated user.
      * Este método se ejecuta cuando un usuario no está autenticado y se intenta acceder a una ruta protegida.
      * Lo sobrescribimos para devolver una respuesta JSON en lugar de intentar una redirección.
@@ -42,18 +64,35 @@ class Authenticate extends Middleware
      *
      * @throws AuthenticationException
      */
+
+
+ /**
+     * Handle an unauthenticated user.
+     * Sobrescribimos este método para lanzar nuestra excepción personalizada.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  array  $guards
+     * @return void
+     * @throws \Illuminate\Auth\AuthenticationException | \App\Exceptions\AuthTokenException
+     */
     protected function unauthenticated($request, array $guards): void
     {
-        // Si la solicitud es de tipo API (es decir, espera una respuesta JSON)
-        // o si la ruta es parte de tu prefijo 'api/',
-        // abortamos la ejecución con una respuesta HTTP 401 Unauthorized y un mensaje JSON.
-        if ($request->expectsJson() || $request->is('api/*')) {
-            abort(response()->json(['message' => 'No autorizado. Se requiere autenticación.'], Response::HTTP_UNAUTHORIZED));
+
+        if ($request->expectsJson()) {
+            $reason = 'no_token';
+            if ($request->bearerToken()) {
+                $reason = 'invalid_or_expired_token';
+            }
+            // Lanza tu excepción personalizada con la razón.
+            throw new AuthTokenException('Authentication failed', $reason, Response::HTTP_UNAUTHORIZED);
         }
 
-        // Si la solicitud NO espera JSON y NO es una ruta API (ej. solicitud web tradicional),
-        // lanzamos la excepción para que el flujo de Laravel (incluyendo el redirectTo)
-        // se encargue de la redirección.
-        parent::unauthenticated($request, $guards);
+        // Si no es JSON, sigue el comportamiento por defecto (que lanzará AuthenticationException).
+        // Si no quieres que tu Handler maneje las redirecciones web,
+        // podrías también lanzar aquí una excepción genérica o dejar solo el redirectTo.
+        parent::unauthenticated($request, $guards); // Esto lanzará la AuthenticationException de Laravel base si no es JSON.
     }
+
+    // La implementación base de Laravel de unauthenticated() ya lanza la AuthenticationException
+    // que tu Handler.php puede interceptar.
 }

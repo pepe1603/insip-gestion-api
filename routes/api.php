@@ -63,13 +63,16 @@ Route::middleware('api')->group(function () {
         });
 
         // Ruta para cerrar sesión es necesario recibir el token
-        Route::post('/logout', [AuthController::class, 'logout']);
+        Route::get('/logout', [AuthController::class, 'logout']);
 
         // Nueva ruta para registrar usuario (protegida y con chequeo de rol)
         Route::post('/register', [AuthController::class, 'registerUser'])->middleware('can:admin'); // <-- Middleware 'can' para el rol
 
+         // Nueva ruta para registrar usuario (protegida y con chequeo de rol)
+        Route::get('/users', [AuthController::class, 'users'])->middleware('can:admin'); // <-- Middleware 'can' para el rol
 
-                // Rutas para Tipos de Asistencia
+
+         // Rutas para Tipos de Asistencia
         Route::prefix('tipos-asistencia')->group(function () {
             Route::get('/', [TipoAsistenciaController::class, 'index']);
             Route::get('/{id}', [TipoAsistenciaController::class, 'show']);

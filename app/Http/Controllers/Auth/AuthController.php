@@ -7,10 +7,13 @@ use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Auth;
+use App\Notifications\LoginNotification;
+use App\Notifications\LogoutNotification;
+use App\Notifications\RegisterUserNotification;
 use App\Notifications\ResetPasswordCodeNotification;
 use Illuminate\Support\Facades\Hash; // Para verificar contraseñas
-use App\Http\Controllers\Controller;
 
 class AuthController extends Controller
 {
@@ -24,6 +27,7 @@ class AuthController extends Controller
 
     public function login(Request $request)
     {
+
         //1.- validar
         $request->validate([
             'email' => 'required|email',
@@ -57,6 +61,8 @@ class AuthController extends Controller
          // Puedes darle un nombre al token (ej. 'auth_token') y definir habilidades si las necesitas.
         // Genera el token. Puedes especificar habilidades si las necesitas.
         $token = $user->createToken('auth_token')->plainTextToken;
+        //4.1 Notificar al usuario
+        $user->notify(new LoginNotification($user, $request->ip()));
 
         //5.- retorna  el token en al respuesta
         return response()->json([
@@ -80,8 +86,20 @@ class AuthController extends Controller
      */
     public function logout(Request $request)
     {
+        // Asegurarse de que hay un usuario autenticado (la ruta debe estar protegida)
+        $user = $request->user();
+
+        if (!$user) {
+            // Esto solo se ejecutaría si la ruta no estuviera protegida,
+            // pero es buena práctica defensiva.
+            return response()->json(['message' => 'No hay usuario autenticado.'], 401);
+        }
+
         // Revoca el token actual para el usuario autenticado
-        $request->user()->currentAccessToken()->delete();
+        $user->currentAccessToken()->delete();
+
+        // Enviar la notificación de cierre de sesión
+        $user->notify(new LogoutNotification()); // <-- Añade esta línea
 
         return response()->json([
             'message' => 'Sesión cerrada exitosamente'
@@ -268,6 +286,10 @@ class AuthController extends Controller
                     // Opcional: Generar un token para el usuario recién creado si quieres loguearlo automáticamente
                     // $token = $user->createToken('auth_token')->plainTextToken;
 
+                    //enviar notirficacion
+                    $loginUrl = env('APP_FRONTEND_LOGIN_URL', 'http://localhost:3000/login'); // ajusta según tu frontend
+                    $user->notify(new RegisterUserNotification($user, $loginUrl, $request->ip()));
+
                     return response()->json([
                         'message' => 'Usuario registrado exitosamente.',
                         'user' => [
@@ -292,4 +314,19 @@ class AuthController extends Controller
         }
 
     }
+
+    /**
+    * Método para devolver todos los usuarios.
+    *
+    * @return \Illuminate\Http\JsonResponse
+    */
+    public function users()
+    {
+       $users = User::all();
+
+       return response()->json([
+          'users' => $users
+       ], 200);
+    }
+
 }

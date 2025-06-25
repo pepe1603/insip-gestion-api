@@ -2,8 +2,8 @@
 
 namespace App\Exceptions;
 
+use Log;
 use Throwable;
-use Illuminate\Http\Request; // ¡CORREGIDO! De ilimuntae a Illuminate
 use App\Helpers\ApiResponse;
 use App\Exceptions\BusinessException;
 use Illuminate\Auth\AuthenticationException;
@@ -13,10 +13,10 @@ use App\Exceptions\EmpleadosExceptions\EmpleadoNoActivoException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use App\Exceptions\EmpleadosExceptions\EmpleadoExistenteException;
-use Symfony\Component\HttpFoundation\Response; // Asegúrate de que esta importación esté presente
-
-
 use App\Exceptions\EmpleadosExceptions\EmpleadoNoEncontradoException;
+
+
+use Illuminate\Http\Request; // ¡CORREGIDO! De ilimuntae a Illuminate
 use App\Exceptions\AsistenciasExceptions\AsistenciaExistenteException;
 use App\Exceptions\VacacionesExceptions\VacacionNoEncontradaException;
 use App\Exceptions\VacacionesExceptions\VacacionYaSolicitadaException;
@@ -35,6 +35,7 @@ use App\Exceptions\TiposAsistenciaExceptions\TipoAsistenciaNoEncontradaException
 use App\Exceptions\EstadosSolicitudExceptions\EstadoSolicitudNoEncontradoException;
 use App\Exceptions\VacacionesOficialesExceptions\VacacionesOficialesExistenteException;
 use App\Exceptions\VacacionesOficialesExceptions\VacacionesOficialesNoEncontradasException;
+use Symfony\Component\HttpFoundation\Response; // Asegúrate de que esta importación esté presente
 
 class Handler extends ExceptionHandler
 {
@@ -59,14 +60,42 @@ class Handler extends ExceptionHandler
             //
         });
 
-        // --- ¡Consolidado y corregido para AuthenticationException! ---
-        $this->renderable(function (AuthenticationException $e, Request $request) {
+       // --- ¡NUEVO: Manejo específico para AuthTokenException! ---
+        $this->renderable(function (AuthTokenException $e, Request $request) {
             if ($request->expectsJson()) {
-                // Devolver siempre 401 Unauthorized para solicitudes API no autenticadas
-                return response()->json(['message' => 'No autorizado. Se requiere autenticación.'], Response::HTTP_UNAUTHORIZED);
+                $message = 'Error de autenticación.';
+                switch ($e->getReason()) {
+                    case 'no_token':
+                        $message = 'No se proporcionó un token de autenticación. Se requiere un token Bearer.';
+                        break;
+                    case 'invalid_or_expired_token':
+                        $message = 'Token de autenticación inválido o expirado. Acceso denegado.';
+                        break;
+                    default:
+                        $message = 'Error de autenticación desconocido.';
+                        break;
+                }
+                return response()->json(['message' => $message], $e->getStatusCode());
             }
-            // Si no espera JSON, deja que el flujo normal de Laravel (o el método unauthenticated
-            // en el middleware Authenticate) se encargue de la redirección si aplica.
+        });
+
+        // --- El viejo renderable para AuthenticationException: ---
+        // Puedes mantenerlo para capturar AuthenticationExceptions lanzadas por otras partes
+        // de Laravel si no se manejan por tu AuthTokenException.
+        // O podrías eliminarlo si estás seguro de que todas las autenticaciones fallidas
+        // pasarán por tu AuthTokenException. Si lo dejas, asegúrate que no haya conflicto
+        // con los mensajes. Podrías hacer que este solo devuelva un mensaje más genérico
+        // si la excepción no tiene un mensaje.
+
+        $this->renderable(function (AuthenticationException $e, Request $request) {
+           // Log::info('AuthenticationException capturada. expectsJson: ' . ($request->expectsJson() ? 'true' : 'false') . ' Message: ' . $e->getMessage());
+
+            if ($request->expectsJson()) {
+                 // Si la excepción ya tiene un mensaje (como "Unauthenticated."), lo usamos.
+                 // Si no, caemos a un default más genérico o a la lógica de bearerToken si es necesario.
+                $message = $e->getMessage() ?: 'No autenticado.'; // Usa el mensaje de la excepción si existe
+                return response()->json(['message' => $message], Response::HTTP_UNAUTHORIZED);
+            }
         });
 
         // renderable para 404, etc..
@@ -105,26 +134,6 @@ class Handler extends ExceptionHandler
         //     }
         // });
     }
-
-    /**
-     * Convert an authentication exception into a response.
-     * Este método NO debe estar en Handler.php. Pertenece a Authenticate.php
-     * Si lo dejas aquí, puedes tener comportamientos inesperados o redundantes.
-     * LO ELIMINARÉ EN LA VERSIÓN CORREGIDA FINAL, PERO LO MENCIONO AQUÍ.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  \Illuminate\Auth\AuthenticationException  $exception
-     * @return \Illuminate\Http\Response|\Illuminate\Http\JsonResponse
-     */
-    // protected function unauthenticated($request, AuthenticationException $exception)
-    // {
-    //     if ($request->expectsJson() || $request->is('api/*')) {
-    //         return response()->json(['message' => 'Unauthenticated'], 401);
-    //     }
-
-    //     return redirect()->guest($exception->redirectTo() ?? route('welcome'));
-    // }
-
 
     // El método render es donde tus ApiResponse personalizados se aplican.
     // Asegúrate de que las excepciones más específicas se manejen antes que las más generales.
