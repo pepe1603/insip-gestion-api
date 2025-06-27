@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Enums\UserRole;
 use Illuminate\Support\Facades\Gate; // Importa la fachada Gate
 use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvider;
 
@@ -21,22 +22,27 @@ class AuthServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // Define el Gate 'admin' para controlar el acceso por rol
         Gate::define('admin', function ($user) {
-            // Asume que tu modelo User tiene una propiedad 'role'
-            // y que 'admin' es el valor para los administradores.
-            return $user->role === 'admin';
+            return $user->role === UserRole::Admin; // Comparación tipada
         });
 
-        // Opcional: Define Gates adicionales si tienes más roles
-         Gate::define('supervisor', function ($user) {
-             return $user->role === 'supervisor' || $user->role === 'admin';
-         });
+        Gate::define('supervisor', function ($user) {
+            return $user->role === UserRole::Supervisor || $user->role === UserRole::Admin;
+        });
 
-        // Gate::define('empleado', function ($user) {
-        //     return $user->role === 'empleado' || $user->role === 'gerente' || $user->role === 'admin';
-        // });
+        // Opcional: Un Gate más genérico para verificar cualquier rol
+        Gate::define('has-role', function ($user, UserRole $role) {
+            return $user->role === $role;
+        });
 
-        // Puedes agregar más Gates o configurar políticas aquí en el futuro.
+        // Opcional: Para verificar si el usuario es 'employee'
+        Gate::define('employee', function ($user) {
+            return $user->role === UserRole::Employee;
+        });
+
+        // Opcional: Para verificar si el usuario es 'user' (rol por defecto)
+        Gate::define('user-role', function ($user) {
+            return $user->role === UserRole::User;
+        });
     }
 }

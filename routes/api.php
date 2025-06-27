@@ -4,8 +4,10 @@ use Illuminate\Http\Request;
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ApiController;
-use App\Http\Controllers\Auth\AuthController;
+use App\Http\Controllers\ProfileController;
 
+use App\Http\Controllers\Auth\AuthController;
+use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Api\Empleados\EmpleadoController;
 use App\Http\Controllers\Api\Vacaciones\VacacionesController;
 use App\Http\Controllers\Api\Asistencias\AsistenciaController;
@@ -57,7 +59,7 @@ Route::middleware('api')->group(function () {
     Route::middleware(['auth:sanctum'])->group(function () {
         //rutas protegidas por sanctum
 
-            // Opcional: Ruta para obtener el usuario autenticado (requiere token)
+            // Opcional: Ruta para obtener el usuario autenticado (requiere token) --> esssto ya lo maneja ñla ruta profile contrller@show
         Route::get('/user', function (Request $request) {
             return $request->user();
         });
@@ -65,11 +67,43 @@ Route::middleware('api')->group(function () {
         // Ruta para cerrar sesión es necesario recibir el token
         Route::get('/logout', [AuthController::class, 'logout']);
 
+        // Nueva ruta para cerrar sesión en otros dispositivos
+        Route::post('/logout-other-devices', [AuthController::class, 'logoutOtherDevices']);
+
+        //verifica email manualmente lalmando a esste endpoint dessde  unbtn ene l frontend
+        Route::post('/verify-email', [AuthController::class, 'markEmailAsVerified']);
+
+
+
         // Nueva ruta para registrar usuario (protegida y con chequeo de rol)
         Route::post('/register', [AuthController::class, 'registerUser'])->middleware('can:admin'); // <-- Middleware 'can' para el rol
 
          // Nueva ruta para registrar usuario (protegida y con chequeo de rol)
-        Route::get('/users', [AuthController::class, 'users'])->middleware('can:admin'); // <-- Middleware 'can' para el rol
+
+        // --- GRUPO DE RUTAS PARA ADMINISTRACIÓN (protegidas por roles) ---
+        Route::prefix('admin')->group(function () {
+            // Route::apiResource genera las 7 rutas RESTful estándar para 'users':
+            // GET      /api/admin/users             -> UserController@index
+            // POST     /api/admin/users             -> UserController@store
+            // GET      /api/admin/users/{user}      -> UserController@show
+            // PUT/PATCH /api/admin/users/{user}     -> UserController@update
+            // DELETE   /api/admin/users/{user}      -> UserController@destroy
+            Route::apiResource('users', UserController::class);
+
+            // Nueva ruta específica para activar/desactivar usuario
+            // Es crucial que esta ruta vaya DESPUÉS de Route::apiResource
+            // para evitar conflictos con la ruta show (users/{user}).
+            Route::patch('users/{user}/toggle-active', [UserController::class, 'toggleActive']);
+        });
+
+        // --- GRUPO DE RUTAS PARA EL PERFIL DEL USUARIO AUTENTICADO ---
+        // No requieren un middleware de rol específico, solo autenticación.
+        Route::prefix('profile')->group(function () {
+            Route::get('/', [ProfileController::class, 'show']);             // Obtener perfil del usuario logueado
+            Route::patch('/', [ProfileController::class, 'update']);         // Actualizar perfil (solo datos)
+            Route::patch('/password', [ProfileController::class, 'updatePassword']); // Actualizar contraseña
+            Route::get('/dashboard-info', [ProfileController::class, 'dashboardInfo']); // Info para frontend
+        });
 
 
          // Rutas para Tipos de Asistencia

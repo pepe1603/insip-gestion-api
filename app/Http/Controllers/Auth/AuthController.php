@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Models\User;
 use Illuminate\Support\Str;
+use App\Helpers\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -315,18 +316,58 @@ class AuthController extends Controller
 
     }
 
-    /**
-    * Método para devolver todos los usuarios.
-    *
-    * @return \Illuminate\Http\JsonResponse
-    */
-    public function users()
-    {
-       $users = User::all();
 
-       return response()->json([
-          'users' => $users
-       ], 200);
+    /**
+     * Cierra la sesión del usuario en todos los dispositivos excepto el actual.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function logoutOtherDevices(Request $request)
+    {
+        try {
+            // Obtén el usuario autenticado actualmente
+            $user = $request->user();
+
+            if (!$user) {
+                return ApiResponse::error('Usuario no autenticado.', 401);
+            }
+
+            // Obtén el ID del token actual que está siendo usado para esta petición
+            // Sanctum proporciona acceso al token actual a través de request->user()->currentAccessToken()
+            $currentAccessTokenId = $user->currentAccessToken()->id;
+
+            // Elimina todos los tokens del usuario, excepto el que se está usando actualmente
+            $user->tokens()
+                 ->where('id', '!=', $currentAccessTokenId)
+                 ->delete();
+
+            // Opcional: Podrías enviar una notificación al usuario indicándole que sus sesiones fueron cerradas en otros dispositivos.
+            // $user->notify(new SessionsLoggedOutNotification());
+
+            return ApiResponse::success('Sesión cerrada en todos los demás dispositivos exitosamente.', null, 200);
+
+        } catch (\Throwable $e) {
+            // Registra el error
+            Log::error('Error al cerrar sesión en otros dispositivos para el usuario ' . ($request->user()->id ?? 'N/A') . ': ' . $e->getMessage(), ['exception' => $e]);
+
+            return ApiResponse::serverError('Ocurrió un error al intentar cerrar sesión en otros dispositivos.');
+        }
     }
+
+    public function markEmailAsVerified(Request $request)
+    {
+        $user = $request->user();
+
+        if ($user->email_verified_at) {
+            return response()->json(['message' => 'El correo ya ha sido verificado.'], 200);
+        }
+
+        $user->email_verified_at = now();
+        $user->save();
+
+        return response()->json(['message' => 'Correo verificado correctamente.']);
+    }
+
 
 }
