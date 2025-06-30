@@ -23,6 +23,12 @@ class Empleado extends Model
         'tipo_contrato'
     ];
 
+    public function user()
+    {
+        return $this->hasOne(User::class, 'empleado_id');
+    }
+
+
     public function departamento()
     {
         return $this->belongsTo(Departamento::class);

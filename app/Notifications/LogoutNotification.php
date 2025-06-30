@@ -4,9 +4,10 @@ namespace App\Notifications;
 
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Notification;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 
-class LogoutNotification extends Notification
+class LogoutNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
@@ -30,7 +31,7 @@ class LogoutNotification extends Notification
             ->line('Has cerrado sesión exitosamente en tu cuenta.')
             ->line('Fecha y hora: ' . $this->logoutAt->format('Y-m-d H:i:s'))
             ->line('Si no fuiste tú, por seguridad cambia tu contraseña lo antes posible.')
-            ->action('Cambiar contraseña', env('FRONTEND_RESET_URL', 'http://localhost:3000/reset'))
-            ->line('¡Gracias por usar nuestra aplicación!');
+            ->action('Cambiar contraseña', env('APP_FRONTEND_RESET_URL', 'http://localhost:3000/reset'))
+            ->line('** ¡Gracias por usar nuestra aplicación! **');
     }
 }

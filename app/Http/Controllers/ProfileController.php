@@ -129,14 +129,16 @@ class ProfileController extends Controller
 
         // Ejemplo: retornar el rol del usuario para lógica condicional en el frontend
         // y un mensaje de bienvenida.
-        return ApiResponse::success('Información para el dashboard.', [
+        $rsp = [
+            'title' => 'Información para el dashboard.',
             'welcome_message' => 'Bienvenido, ' . $user->name . '!',
             'user_role' => $user->role->value, // Accede al valor string del Enum
             'is_active' => $user->is_active,
             // Puedes añadir más datos aquí que necesite tu frontend
             // 'notifications_count' => $user->unreadNotifications()->count(),
-            // 'last_login' => $user->last_login,
-        ]);
+             //'last_login' => $user->last_login,
+        ];
+        return ApiResponse::success($rsp);
     }
 
 

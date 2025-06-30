@@ -3,10 +3,11 @@
 namespace App\Notifications;
 
 use Illuminate\Bus\Queueable;
-use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Notifications\Messages\MailMessage;
 
-class RegisterUserNotification extends Notification
+class RegisterUserNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
@@ -31,17 +32,17 @@ class RegisterUserNotification extends Notification
     {
         return (new MailMessage)
             ->subject('¡Bienvenido a la Plataforma!')
-            ->greeting('Hola ' . $this->user->Name . ' 👋')
-            ->line('Tu cuenta ha sido creada exitosamente.',' - Fecha y hora: ' . $this->registerAt->format('Y-m-d H:i:s'))
+            ->greeting('Hola ' . $this->user->name . ' 👋') // Corregido a $this->user->name
+            ->line('Tu cuenta ha sido creada exitosamente.') // Separado en dos líneas para claridad
+            ->line('Fecha y hora: ' . $this->registerAt->format('Y-m-d H:i:s'))
             ->line('**Detalles de tu cuenta:**')
             ->line('Email: ' . $this->user->email)
             ->line('Rol: ' . ucfirst($this->user->role))
             ->line('IP: ' . $this->ip)
             ->action('Iniciar sesión ahora', $this->loginUrl)
             ->line('')
-            ->line('')
             ->line('Si no fuiste tú, cambia tu contraseña inmediatamente.')
-            ->action('Cambiar contraseña', env('APP_FRONTEND_RESET_URL', 'http://localhost:3000/reset'))
+            ->action('Cambiar contraseña', env('APP_FRONTEND_RESET_URL', 'http://localhost:3000/reset-password')) // Recomiendo usar reset-password como en tu .env
             ->line('Gracias por unirte a nosotros. ¡Esperamos que tengas una excelente experiencia!');
     }
 }

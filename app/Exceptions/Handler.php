@@ -17,6 +17,7 @@ use App\Exceptions\EmpleadosExceptions\EmpleadoNoEncontradoException;
 
 
 use Illuminate\Http\Request; // ¡CORREGIDO! De ilimuntae a Illuminate
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use App\Exceptions\AsistenciasExceptions\AsistenciaExistenteException;
 use App\Exceptions\VacacionesExceptions\VacacionNoEncontradaException;
 use App\Exceptions\VacacionesExceptions\VacacionYaSolicitadaException;
@@ -24,11 +25,11 @@ use App\Exceptions\AsistenciasExceptions\AsistenciaHoraInvalidaException;
 use App\Exceptions\AsistenciasExceptions\AsistenciaNoEncontradaException;
 use App\Exceptions\VacacionesExceptions\VacacionesInsuficientesException;
 use App\Exceptions\DepartamentosExceptions\DepartamentoExistenteException;
+
+
+
+
 use App\Exceptions\DepartamentosExceptions\DepartamentoNoEncontradoException;
-
-
-
-
 use App\Exceptions\TiposAsistenciaExceptions\TipoAsistenciaexistenteException;
 use App\Exceptions\EstadosSolicitudExceptions\EstadoSolicitudExistenteException;
 use App\Exceptions\TiposAsistenciaExceptions\TipoAsistenciaNoEncontradaException;
@@ -174,6 +175,12 @@ class Handler extends ExceptionHandler
         // Manejo de ValidationException: Ya lo tienes en renderable, pero si por alguna razón llega aquí...
         if ($exception instanceof ValidationException) {
             return response()->json(['errors' => $exception->validator->errors()], 422);
+        }
+        //AccessDeniedHttpException
+        if ($exception instanceof AccessDeniedHttpException) {
+            return response()->json([
+                'message' => 'Acceso No Autorizado / unauthorized'
+            ], 4003);
         }
 
         // Manejo de ModelNotFoundException: Ya lo tienes en renderable, pero si por alguna razón llega aquí...

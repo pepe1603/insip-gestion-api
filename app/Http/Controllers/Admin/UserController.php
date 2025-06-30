@@ -129,44 +129,64 @@ public function __construct()
     /**
      * Crea un nuevo usuario.(Solo accesible por admin)
      * POST /api/admin/users
-     *
+     *Registro interno de un nuevo usuario por un administrador.
+    * Solo los usuarios con el rol 'admin' pueden acceder a este método.
      * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\JsonResponse
      */
     public function store(Request $request)
     {
-        try {
-            $validatedData = $request->validate([
+       try {
+            // Validar los datos de entrada
+            $validated = $request->validate([
                 'name' => 'required|string|max:255',
-                'email' => 'required|string|email|max:255|unique:users', // Email debe ser único
-                'password' => 'required|string|min:8|confirmed', // 'confirmed' busca 'password_confirmation'
-                'role' => ['nullable', 'string', Rule::in(array_column(UserRole::cases(), 'value'))],
-                'is_active' => 'nullable|boolean',
+                'email' => 'required|string|email|max:255|unique:users,email',
+                'password' => 'required|string|min:8|confirmed',
+                'role' => ['required', 'string', Rule::in(array_column(UserRole::cases(), 'value'))], // Asegurarse que el rol sea uno de los definidos en el enum
             ]);
 
+            // Verificar si el correo ya está registrado en la base de usuarios
+            $existingUser = User::where('email', $validated['email'])->first();
+            if ($existingUser) {
+                return response()->json([
+                    'message' => 'El correo electrónico ya está registrado en el sistema.',
+                ], 400); // 400 - Bad Request
+            }
+
+            // Crear el nuevo usuario con el rol proporcionado
             $user = User::create([
-                'name' => $validatedData['name'],
-                'email' => $validatedData['email'],
-                'password' => bcrypt($validatedData['password']), // ¡Siempre hashear contraseñas!
-                'role' => $validatedData['role'] ?? UserRole::User->value, // Usar el valor del Enum
-                'is_active' => $validatedData['is_active'] ?? true,
+                'name' => $validated['name'],
+                'email' => $validated['email'],
+                'password' => Hash::make($validated['password']),
+                'role' => $validated['role'],
+                'is_active' => true,
             ]);
 
-            return ApiResponse::send(201, $user); // 201 Created para creación exitosa
+            // Notificar al usuario de su creación
+            $loginUrl = env('APP_FRONTEND_LOGIN_URL', 'http://localhost:3000/login');
+            $user->notify(new RegisterUserNotification($user, $loginUrl, $request->ip()));
+
+            return response()->json([
+                'message' => 'Usuario registrado exitosamente.',
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'role' => $user->role,
+                ]
+            ], 201); // Código 201 - Created
 
         } catch (ValidationException $e) {
-            // Laravel automáticamente convierte ValidationException a 422,
-            // pero puedes capturarla aquí si quieres añadir lógica específica o usar ApiResponse.
-            return ApiResponse::send(422, [ 'message' => 'Los datos proporcionados no son válidos.', 'exception' => $e->errors()]);
-        } catch (Throwable $e) {
-            $response = [
-                'message' => 'Ocurrió un error inesperado al crear los detalles del usuario.',
-                'errors' => [
-                    'message' => "Error al crear usuario : " . $e->getMessage(),
-                    'exception' => $e
-                ],
-            ];
-            return ApiResponse::serverError($response);
+            return response()->json([
+                'message' => 'Error de validación.',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Error en registro interno:', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Error inesperado al registrar el usuario.',
+                'error' => $e->getMessage(),
+            ], 500);
         }
     }
 
@@ -211,7 +231,7 @@ public function __construct()
         } catch (BusinessException $e) {
             return ApiResponse::send($e->getCode(), $e->getMessage());
         } catch (ValidationException $e) {
-            return ApiResponse::send(422,[ 'message' => 'Los datos proporcionados no son válidos.','exceptions' => $e->errors()]);
+            return ApiResponse::send(422,[ 'message' => 'Los datos proporcionados no son válidos.', 'exceptions' => $e->errors()]);
         } catch (Throwable $e) {
              $response = [
                 'message' => 'Ocurrió un error inesperado al actualizar el usuario.',
@@ -240,15 +260,22 @@ public function __construct()
 
             // Opcional: Prevenir que un administrador se elimine a sí mismo
             if ($user->id === auth()->id()) {
-                throw new BusinessException('No puedes eliminar tu propia cuenta de administrador.', 403);
+                throw new BusinessException('No puedes eliminar tu propia cuenta.', 403);
             }
+
+            //verficar el estado is_active -> true par aoder eliminar.
+            if ($user->is_active === true){
+                throw new BusinessException('No puedes eliminar un usuario que esta activo.');
+            }
+
+
 
             $user->delete();
 
             return ApiResponse::send(204 , null); // 204 No Content para eliminación exitosa sin cuerpo de respuesta
 
         } catch (BusinessException $e) {
-            return ApiResponse::send($e->getMessage(), $e->getCode());
+            return ApiResponse::send($e->getCode(), $e->getMessage());
         } catch (Throwable $e) {
             $response = [
                 'message' => 'Ocurrió un error inesperado al eliminar el usuario.',
@@ -295,7 +322,7 @@ public function __construct()
             $user->save();
 
             $status = $user->is_active ? 'activo' : 'inactivo';
-            return ApiResponse::send(200,['message' => "Usuario {$status} exitosamente.", $user]);
+            return ApiResponse::send(200,['message' => "El estado del ususario cambio a {$status} exitosamente.", $user]);
 
         } catch (BusinessException $e) {
             return ApiResponse::send($e->getCode(), $e->getMessage() );

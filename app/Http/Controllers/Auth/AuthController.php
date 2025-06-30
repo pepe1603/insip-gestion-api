@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Models\User;
+use App\Enums\UserRole;
+use App\Models\Empleado;
 use Illuminate\Support\Str;
 use App\Helpers\ApiResponse;
 use Illuminate\Http\Request;
@@ -10,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Auth;
+use App\Exceptions\BusinessException;
 use App\Notifications\LoginNotification;
 use App\Notifications\LogoutNotification;
 use App\Notifications\RegisterUserNotification;
@@ -19,13 +22,118 @@ use Illuminate\Support\Facades\Hash; // Para verificar contraseñas
 class AuthController extends Controller
 {
 
+/**
+ * Registra público de un nuevo usuario. Con asignación automática de roles.
+ * Requiere que el usuario autenticado tenga el rol 'admin'.
+ *
+ * @param  \Illuminate\Http\Request  $request
+ * @return \Illuminate\Http\JsonResponse
+ */
+public function signIn(Request $request)
+{
+    try {
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|string|email|max:255|unique:users,email',
+            'password' => 'required|string|min:8|confirmed',//busca campopassword_confirmation
+        ]);
+
+        // --- Validación 1: ¿El correo ya está registrado en la base de usuarios? ---
+        $existingUser = User::where('email', $validated['email'])->first();
+
+        // Si el correo ya está registrado, devolver un mensaje de error
+        if ($existingUser) {
+            return response()->json([
+                'message' => 'El correo electrónico ya está registrado en el sistema. Por favor, utiliza otro correo o inicia sesión.',
+            ], 400); // Código HTTP 400 - Bad Request
+        }
+
+        // Buscar si existe un empleado con ese correo
+        $empleado = Empleado::where('email', $validated['email'])->first();
+
+        // --- Validación 2: Si el correo se encuentra en la base de empleados, asignamos el rol de 'Empleado' ---
+        if ($empleado) {
+            $role = UserRole::Employee->value;
+            $message = 'Correo encontrado en empleados. Se asignará el rol de "Empleado".';
+        } else {
+            // Si no se encuentra, verificar si el usuario ya confirmó continuar como "Usuario"
+            if (!$request->boolean('confirmed_as_user')) {
+                $role = UserRole::User->value;
+                $message = 'No encontramos el correo en la base de empleados. Si desea continuar, será registrado como <Usuario> .';
+
+                return response()->json([
+                    'message' => $message,
+                    'role' => $role,
+                    'action_required' => true, // Indica que se necesita confirmación
+                ], 200);
+            }
+
+        if ($empleado && $empleado->status === 'INACTIVO'){
+            throw new BusinessException("No se puede registrar un empleado que se encuentra Inactivo");
+        }
+
+            // Si confirmó, se procede como "Usuario"
+            $role = UserRole::User->value;
+            $message = 'Correo no encontrado en empleados. Se registrará como "Usuario".';
+        }
+
+
+        // Crear el nuevo usuario con el rol correspondiente
+        $user = User::create([
+            'name' => $validated['name'],
+            'email' => $validated['email'],
+            'password' => Hash::make($validated['password']),
+            'role' => $role,
+            'is_active' => true,
+            'empleado_id' => $empleado?->id, // Si hay un empleado asociado, asignamos el ID
+        ]);
+
+        // Notificar al usuario
+        $loginUrl = env('APP_FRONTEND_LOGIN_URL', 'http://localhost:3000/login');
+        $user->notify(new RegisterUserNotification($user, $loginUrl, $request->ip()));
+
+        // Devolver una respuesta exitosa con los datos del usuario registrado
+        return response()->json([
+            'message' => 'Usuario registrado exitosamente.',
+            'details' => [
+                'name' => $user->name,
+                'email' => $user->email,
+            ]
+        ], 201); // Código HTTP 201 - Created
+
+    } catch (ValidationException $e) {
+        return response()->json([
+            'message' => 'Error de validación.',
+            'errors' => $e->errors()
+        ], 422);
+    } catch (BusinessException $e) {
+        return ApiResponse::send($e->getCode(), $e->getMessage());
+    } catch (\Exception $e) {
+        Log::error('Error en registro público:', ['error' => $e->getMessage()]);
+        return response()->json([
+            'message' => 'Error inesperado al registrar el usuario.', $e,
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+}
+
+/**
+ * ¿Qué hace esto?
+
+*action_required: true: Indica que el frontend necesita mostrar un mensaje o interfaz en la que el
+* usuario puede confirmar si quiere continuar con el registro como "Usuario". Esta es la manera en que el
+* cliente puede interactuar con el usuario antes de completar el registro.
+*Flexibilidad para el usuario: Esto te da la flexibilidad de ofrecer al usuario la opción de continuar con el
+* registro como un "Usuario" si no está asociado con un empleado.
+ */
+
+
         /**
      * Maneja la solicitud de login y genera un token Sanctum.
      *
      * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\JsonResponse
      */
-
     public function login(Request $request)
     {
 
@@ -253,69 +361,6 @@ class AuthController extends Controller
 
         return response()->json(['message' => 'Contraseña restablecida exitosamente.'], 200);
     }
-
-
-    /**
-     * Registra un nuevo usuario. Solo accesible para administradores autenticados.
-     * Requiere que el usuario autenticado tenga el rol 'admin'.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
-     */
-    public function registerUser(Request $request)
-    {
-        // El middleware 'can:admin' ya se encarga de la autorización.
-        // Si llegamos aquí, el usuario es administrador.
-
-        try{
-            $request->validate([
-                        'name' => 'required|string|max:255',
-                        'email' => 'required|string|email|max:255|unique:users',
-                        'password' => 'required|string|min:8|confirmed',
-                        'role' => 'required|string|in:admin,empleado,gerente', // Define tus roles permitidos
-                        // Añade más campos si tu modelo User los requiere (ej. departamento_id, etc.)
-                    ]);
-
-                    $user = User::create([
-                        'name' => $request->name,
-                        'email' => $request->email,
-                        'password' => Hash::make($request->password),
-                        'role' => $request->role,
-                        // ... otros campos
-                    ]);
-
-                    // Opcional: Generar un token para el usuario recién creado si quieres loguearlo automáticamente
-                    // $token = $user->createToken('auth_token')->plainTextToken;
-
-                    //enviar notirficacion
-                    $loginUrl = env('APP_FRONTEND_LOGIN_URL', 'http://localhost:3000/login'); // ajusta según tu frontend
-                    $user->notify(new RegisterUserNotification($user, $loginUrl, $request->ip()));
-
-                    return response()->json([
-                        'message' => 'Usuario registrado exitosamente.',
-                        'user' => [
-                            'id' => $user->id,
-                            'name' => $user->name,
-                            'email' => $user->email,
-                            'role' => $user->role,
-                        ],
-                        // 'access_token' => $token, // Si decides generar token
-                        // 'token_type' => 'Bearer',
-                    ], 201); // 201 Created
-        }catch(ValidationException $e ){
-            return response()->json([
-                'message' => 'Valitation Error',
-                'error' => $e->errors()
-            ], 422 );
-        }catch ( \Excception $e ){
-            return response()->json([
-                'messgae'=> 'Ocurrio un Error durante el registro.',
-                'error' => $e->getMesssage()
-            ], 500);
-        }
-
-    }
-
 
     /**
      * Cierra la sesión del usuario en todos los dispositivos excepto el actual.

@@ -28,6 +28,12 @@ class User extends Authenticatable
         'is_active',
     ];
 
+    public function empleado()
+    {
+        return $this->belongsTo(Empleado::class, 'empleado_id');
+    }
+
+
     /**
      * The attributes that should be hidden for serialization.
      *

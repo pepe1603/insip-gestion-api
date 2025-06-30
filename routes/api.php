@@ -42,8 +42,9 @@ Route::middleware('api')->group(function () {
 
     //rutas de authenticacion
     Route::post('/login', [AuthController::class, 'login'] );
+    Route::post('/sign-in', [AuthController::class, 'signIn'] );
     Route::post('/forgot-password', [AuthController::class, 'forgotPassword']); // Nueva ruta para recuperación
-   Route::post('/verify-reset-code', [AuthController::class, 'verifyResetCode']); // <-- ¡NUEVA RUTA para verificar!
+    Route::post('/verify-reset-code', [AuthController::class, 'verifyResetCode']); // <-- ¡NUEVA RUTA para verificar!
     Route::post('/reset-password', [AuthController::class, 'resetPassword']);     // Restablece con el código
 
 
@@ -73,10 +74,6 @@ Route::middleware('api')->group(function () {
         //verifica email manualmente lalmando a esste endpoint dessde  unbtn ene l frontend
         Route::post('/verify-email', [AuthController::class, 'markEmailAsVerified']);
 
-
-
-        // Nueva ruta para registrar usuario (protegida y con chequeo de rol)
-        Route::post('/register', [AuthController::class, 'registerUser'])->middleware('can:admin'); // <-- Middleware 'can' para el rol
 
          // Nueva ruta para registrar usuario (protegida y con chequeo de rol)
 
@@ -259,3 +256,14 @@ Route::middleware('api')->group(function () {
 
 });
 
+
+
+
+/**
+ *
+ *
+ *         // Validación de los datos de entrada
+
+ *
+ *
+ */

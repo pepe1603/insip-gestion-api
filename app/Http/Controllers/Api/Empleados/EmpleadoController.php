@@ -37,6 +37,8 @@ class EmpleadoController extends Controller
             'ape_materno'    => 'required|string|max:255',
             'fecha_ingreso'  => 'required|date',
             'puesto'         => 'required|string|max:255',
+            'email'          => 'required|string|email|max:255|unique:empleados',
+            'telefono'        => 'string|max:25',
             'departamento_id' => 'required|exists:departamentos,id',
             'status'         => 'required|in:ACTIVO,INACTIVO',
             'tipo_contrato'  => 'required|in:TIEMPO_COMPLETO,MEDIO_TIEMPO,TEMPORAL',

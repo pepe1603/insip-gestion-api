@@ -7,7 +7,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class ResetPasswordCodeNotification extends Notification
+class ResetPasswordCodeNotification extends Notification implements ShouldQueue
 {
     use Queueable;
     public string $code; //codigo de verificacion

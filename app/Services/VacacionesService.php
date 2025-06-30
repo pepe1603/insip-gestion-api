@@ -2,21 +2,33 @@
 
 namespace App\Services;
 
+use Carbon\Carbon;
+use App\Traits\NotificaEmpleado;
 use App\Models\Vacaciones;
-use App\Models\Empleado;
-use App\Models\Departamento;
-use App\Models\EstadoSolicitud;
-use App\Models\CicloServicio;
-use App\Models\VacacionesOfficiales;
 use App\Helpers\ApiResponse;
+use App\Models\Departamento;
+use App\Models\CicloServicio;
+use App\Models\EstadoSolicitud;
+use Illuminate\Support\Facades\DB;
+use App\Models\VacacionesOfficiales;
 use App\Exceptions\BusinessException;
+use Illuminate\Notifications\Notification;
 use App\Exceptions\EmpleadosExceptions\EmpleadoNoEncontradoException;
 use App\Exceptions\VacacionesExceptions\VacacionNoEncontradaException;
-use Carbon\Carbon;
-use Illuminate\Support\Facades\DB;
 
 class VacacionesService
 {
+
+    use NotificaEmpleado;
+    //correo srElixzabeth
+    protected $emailAdminRH;
+
+    public function __construct() {
+        $this->emailAdminRH = env('MAIL_ADMIN_RH');
+    }
+
+
+
     public function all()
     {
         return ApiResponse::success(
@@ -149,6 +161,16 @@ class VacacionesService
         $dataToCreate['estado_solicitud_id'] = $estadoPendiente->id;
 
         $solicitud = Vacaciones::create($dataToCreate);
+
+        //notificar al empleado
+        $this->notificarEmpleado($empleado, new NotificarEmpleadoSolicitud($nuevoEstado, $solicitud));
+
+
+        // Notificar a Elizabeth (Admin RH)
+        $admin = User::where('email', $emailAdminRH)->first(); // cambia el correo real
+        if ($admin) {
+            $admin->notify(new NotificarAdminSolicitudVacaciones($empleado));
+        }
 
         return ApiResponse::success($solicitud);
     }
@@ -409,6 +431,11 @@ class VacacionesService
             // La disponibilidad actual siempre se recalcula dinámicamente en `getDisponibilidad`.
 
             DB::commit();
+
+            //enviar notificacion
+            $this->notificarEmpleado($empleado, new NotificarEmpleadoSolicitud($nuevoEstado, $solicitud));
+
+
             return ApiResponse::success($solicitud->fresh(), "Estado de la solicitud cambiado a {$nuevoEstado} correctamente.");
 
         } catch (\Exception $e) {

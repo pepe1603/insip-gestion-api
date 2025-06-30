@@ -35,7 +35,7 @@ class VacacionesController extends Controller
         } catch (BusinessException | EmpleadoNoEncontradoException $e) {
             return ApiResponse::error($e->getMessage(), $e->getCode());
         } catch (\Exception $e) {
-            return ApiResponse::error('Error al registrar la solicitud: ' . $e->getMessage(), 500);
+            return ApiResponse::error($e->getMessage());
         }
     }
 
