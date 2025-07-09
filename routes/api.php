@@ -271,6 +271,18 @@ Route::middleware('api')->group(function () {
                 Route::get('/status-counts', [EmpleadoController::class, 'getStatusCounts']); // Conteo de activos/inactivos
                 Route::get('/recien-ingresados', [EmpleadoController::class, 'getRecentlyHired']); // Empleados recién ingresados
             });
+
+            // VAcaiones para elñ Dashboard
+            Route::prefix('vacaciones')->group(function () {
+                Route::get('/resumen-estados/{anio}', [VacacionesController::class, 'getResumenEstadosVacaciones']);
+                Route::get('/proximas', [VacacionesController::class, 'getProximasVacaciones']);
+                Route::get('/dias-por-mes/{anio}', [VacacionesController::class, 'getDiasVacacionesPorMes']);
+                Route::get('/disponibilidad-general', [VacacionesController::class, 'getDisponibilidadGeneralVacaciones']);
+                Route::get('/empleados/top-antiguos', [VacacionesController::class, 'getTopEmpleadosAntiguos']);
+
+            });
+
+
         });
 
     });//fin del middleware 'auth:sanctum'

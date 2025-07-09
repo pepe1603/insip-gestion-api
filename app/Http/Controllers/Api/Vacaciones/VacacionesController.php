@@ -144,4 +144,77 @@ class VacacionesController extends Controller
             return ApiResponse::error('Error al consultar la disponibilidad: ' . $e->getMessage(), 500);
         }
     }
+
+//------- Dashjbvoard metodss --------
+
+    /**
+     * Obtiene el resumen de solicitudes de vacaciones por estado para el dashboard.
+     * GET /api/dashboard/vacaciones/resumen-estados/{anio}
+     */
+    public function getResumenEstadosVacaciones(Request $request, int $anio)
+    {
+        try {
+            $data = $this->vacacionesService->getResumenVacacionesPorEstado($anio);
+            return ApiResponse::success($data, 'Resumen de estados de vacaciones obtenido exitosamente.');
+        } catch (\Exception $e) {
+            return ApiResponse::error('Error al obtener el resumen de estados: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Obtiene las próximas vacaciones aprobadas para el dashboard.
+     * GET /api/dashboard/vacaciones/proximas
+     */
+    public function getProximasVacaciones()
+    {
+        try {
+            $data = $this->vacacionesService->getVacacionesProximas();
+            return ApiResponse::success($data, 'Próximas vacaciones obtenidas exitosamente.');
+        } catch (\Exception $e) {
+            return ApiResponse::error('Error al obtener próximas vacaciones: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Obtiene el total de días de vacaciones aprobados por mes para el dashboard.
+     * GET /api/dashboard/vacaciones/dias-por-mes/{anio}
+     */
+    public function getDiasVacacionesPorMes(Request $request, int $anio)
+    {
+        try {
+            $data = $this->vacacionesService->getDiasVacacionesPorMesAcumulado($anio);
+            return ApiResponse::success($data, 'Días de vacaciones por mes obtenidos exitosamente.');
+        } catch (\Exception $e) {
+            return ApiResponse::error('Error al obtener días de vacaciones por mes: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Obtiene la disponibilidad general de vacaciones de todos los empleados para el dashboard.
+     * GET /api/dashboard/vacaciones/disponibilidad-general
+     */
+    public function getDisponibilidadGeneralVacaciones()
+    {
+        try {
+            $data = $this->vacacionesService->getDisponibilidadVacacionesGeneral();
+            return ApiResponse::success($data, 'Disponibilidad general de vacaciones obtenida exitosamente.');
+        } catch (\Exception $e) {
+            return ApiResponse::error('Error al obtener disponibilidad general de vacaciones: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Obtiene los empleados con mayor antigüedad para el dashboard.
+     * GET /api/dashboard/empleados/top-antiguos
+     */
+    public function getTopEmpleadosAntiguos()
+    {
+        try {
+            $data = $this->vacacionesService->getTopEmpleadosMasAntiguos();
+            return ApiResponse::success($data, 'Top empleados con mayor antigüedad obtenidos exitosamente.');
+        } catch (\Exception $e) {
+            return ApiResponse::error('Error al obtener top empleados antiguos: ' . $e->getMessage(), 500);
+        }
+    }
+
 }

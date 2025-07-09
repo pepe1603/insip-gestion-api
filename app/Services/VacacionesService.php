@@ -726,4 +726,125 @@ class VacacionesService
             ->get();
         return $datos->toArray();
     }
+
+
+    //- Metofdos Dashboard
+    /**
+     * proporcionaría un resumen de las solicitudes de vacaciones por estado (aprobadas, pendientes, rechazadas, canceladas, asignadas)
+     *  para un año específico.
+     * Tener una vision general del flujo de solicitudesss
+     * @param integer $anio
+     * @return array
+     */
+public function getResumenVacacionesPorEstado(int $anio): array
+{
+    $estados = ['APROBADO', 'RECHAZADO', 'PENDIENTE', 'CANCELADO', 'ASIGNADO'];
+    $counts = [];
+
+    foreach ($estados as $estadoNombre) {
+        $estadoId = EstadoSolicitud::where('estado', $estadoNombre)->first()->id ?? null;
+        $count = 0;
+        if ($estadoId) {
+            $count = Vacaciones::where('estado_solicitud_id', $estadoId)
+                               ->whereHas('cicloServicio', fn($q) => $q->where('anio', $anio))
+                               ->count();
+        }
+        $counts[strtolower($estadoNombre)] = $count;
+    }
+
+    // Opcional: Contar las vacaciones no solicitadas (días asignados pero no usados)
+    // Esto es más complejo y podría requerir iterar sobre empleados y sus ciclos.
+    // Por ahora, se mantendrá en 0 como en tu reporteResumen para simplificar,
+    // o se podría calcular en un método separado si es necesario para el dashboard.
+    $counts['no_solicitadas'] = 0; // Podría calcularse como total_asignado - (aprobadas + pendientes + rechazadas + canceladas) si se desglosa bien.
+
+
+    $counts['total_solicitudes'] = array_sum($counts); // Suma de todas las solicitudes con estado conocido
+
+    return $counts;
+}
+
+
+/**
+ * Este método listaría las próximas vacaciones aprobadas,
+ * lo que es útil para ver qué empleados estarán ausentes pronto.
+ *
+ * @param integer $limit
+ * @return array
+ */
+public function getVacacionesProximas(int $limit = 5): array
+{
+    $vacacionesProximas = Vacaciones::whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
+        ->where('fecha_inicio', '>=', now()->toDateString()) // Desde hoy en adelante
+        ->orderBy('fecha_inicio', 'asc')
+        ->with(['empleado' => function($query) {
+            $query->select('id', 'nombre', 'ape_materno', 'ape_materno'); // Selecciona solo los campos necesarios del empleado
+        }])
+        ->limit($limit)
+        ->get();
+
+    return $vacacionesProximas->map(function ($vacacion) {
+        return [
+            'empleado' => $vacacion->empleado ? $vacacion->empleado->getFullName() : 'N/A',
+            'fecha_inicio' => Carbon::parse($vacacion->fecha_inicio)->format('d/m/Y'),
+            'fecha_fin' => Carbon::parse($vacacion->fecha_fin)->format('d/m/Y'),
+            'dias_solicitados' => $vacacion->dias_vacaciones_solicitados,
+        ];
+    })->toArray();
+}
+
+
+/**
+ * Este método calcularía la suma de días de vacaciones solicitados y aprobados por cada mes de un año dado.
+ * Esto permite ver tendencias y picos de solicitudes.
+ *
+ * @param integer $anio
+ * @return array
+ */
+public function getDiasVacacionesPorMesAcumulado(int $anio): array
+{
+    $datosMensuales = Vacaciones::selectRaw('MONTH(fecha_inicio) as mes, SUM(dias_vacaciones_solicitados) as total_dias')
+        ->whereYear('fecha_inicio', $anio)
+        ->whereHas('estadoSolicitud', fn($q) => $q->where('estado', 'APROBADO'))
+        ->groupByRaw('MONTH(fecha_inicio)')
+        ->orderByRaw('MONTH(fecha_inicio)')
+        ->get()
+        ->keyBy('mes') // Agrupa por el número del mes para fácil acceso
+        ->toArray();
+
+    // Rellenar con 0 los meses sin datos para una visualización completa
+    $resultado = [];
+    for ($i = 1; $i <= 12; $i++) {
+        $mesNombre = Carbon::create(null, $i, 1)->translatedFormat('F'); // Nombre del mes
+        $resultado[] = [
+            'mes' => $mesNombre,
+            'total_dias' => $datosMensuales[$i]['total_dias'] ?? 0
+        ];
+    }
+
+    return $resultado;
+}
+/**
+ * Una sección para reconocer a los empleados con más antigüedad o para identificar aquellos con mayor acumulación de días base.
+ *
+ * @param integer $limit
+ * @return array
+ */
+public function getTopEmpleadosMasAntiguos(int $limit = 5): array
+{
+    $empleados = Empleado::orderBy('fecha_ingreso', 'asc') // Ordenar por fecha de ingreso ascendente (más antiguos primero)
+                        ->limit($limit)
+                        ->get();
+
+    return $empleados->map(function ($empleado) {
+        $antiguedad = Carbon::parse($empleado->fecha_ingreso)->diffInYears(now());
+        return [
+            'empleado' => $empleado->getFullName(),
+            'fecha_ingreso' => Carbon::parse($empleado->fecha_ingreso)->format('d/m/Y'),
+            'antiguedad_anios' => $antiguedad,
+            // Puedes añadir los días base calculados si lo necesitas aquí, llamando a calcularDiasBasePorAntiguedad
+        ];
+    })->toArray();
+}
+
 }
