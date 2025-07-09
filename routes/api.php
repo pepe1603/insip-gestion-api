@@ -42,8 +42,8 @@ Route::middleware('api')->group(function () {
 
     //rutas de authenticacion
     Route::post('/login', [AuthController::class, 'login'] );
-    Route::post('/sign-in', [AuthController::class, 'signIn'] );
-    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']); // Nueva ruta para recuperación
+    Route::post('/register', [AuthController::class, 'register'] );
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:5,1'); // Limitación de 5 intentos por minuto por IP // Nueva ruta para recuperación
     Route::post('/verify-reset-code', [AuthController::class, 'verifyResetCode']); // <-- ¡NUEVA RUTA para verificar!
     Route::post('/reset-password', [AuthController::class, 'resetPassword']);     // Restablece con el código
 
@@ -61,9 +61,11 @@ Route::middleware('api')->group(function () {
         //rutas protegidas por sanctum
 
             // Opcional: Ruta para obtener el usuario autenticado (requiere token) --> esssto ya lo maneja ñla ruta profile contrller@show
-        Route::get('/user', function (Request $request) {
+        /* por sweguridda usamno enle metodo show de profile controllerr
+        Route::get('/me', function (Request $request) {
             return $request->user();
         });
+        */
 
         // Ruta para cerrar sesión es necesario recibir el token
         Route::get('/logout', [AuthController::class, 'logout']);
@@ -96,7 +98,7 @@ Route::middleware('api')->group(function () {
         // --- GRUPO DE RUTAS PARA EL PERFIL DEL USUARIO AUTENTICADO ---
         // No requieren un middleware de rol específico, solo autenticación.
         Route::prefix('profile')->group(function () {
-            Route::get('/', [ProfileController::class, 'show']);             // Obtener perfil del usuario logueado
+            Route::get('/me', [ProfileController::class, 'show']);             // Obtener perfil del usuario logueado
             Route::patch('/', [ProfileController::class, 'update']);         // Actualizar perfil (solo datos)
             Route::patch('/password', [ProfileController::class, 'updatePassword']); // Actualizar contraseña
             Route::get('/dashboard-info', [ProfileController::class, 'dashboardInfo']); // Info para frontend
@@ -250,20 +252,25 @@ Route::middleware('api')->group(function () {
 
         });
 
-    });
+        /*
+        *## Rutas Específicas para el Dashboard
+        */
+        // Agrupa las rutas del dashboard bajo un prefijo claro
+        Route::prefix('dashboard')->group(function () {
+            // Asistencias para el Dashboard
+            Route::prefix('asistencias')->group(function () {
+                // Endpoint para obtener las asistencias del día
+                Route::get('/hoy', [AsistenciaController::class, 'getAsistenciasHoy']);
+                // Endpoint para obtener las últimas asistencias registradas (para un feed de actividad)
+                Route::get('/recientes', [AsistenciaController::class, 'getLatestAsistencias']); // Renombrado a 'recientes'
+            });
 
+            // Aquí podrías añadir más rutas específicas para el dashboard de otros módulos
+            // Ejemplo:
+            // Route::prefix('empleados')->group(function () {
+            //     Route::get('/activos-count', [EmpleadoController::class, 'getActiveEmployeesCount']);
+            // });
+        });
 
-
-});
-
-
-
-
-/**
- *
- *
- *         // Validación de los datos de entrada
-
- *
- *
- */
+    });//fin del middleware 'auth:sanctum'
+});//Find el Middleware 'api

@@ -2,12 +2,13 @@
 
 namespace App\Http\Controllers\Api\Asistencias;
 
-use App\Exceptions\EmpleadosExceptions\EmpleadoNoEncontradoException;
-use App\Helpers\ApiResponse;
-use App\Http\Controllers\Controller;
+use Carbon\Carbon;
 use App\Models\Asistencia;
+use App\Helpers\ApiResponse;
 use Illuminate\Http\Request;
 use App\Services\AsistenciaService;
+use App\Http\Controllers\Controller;
+use App\Exceptions\EmpleadosExceptions\EmpleadoNoEncontradoException;
 
 class AsistenciaController extends Controller
 {
@@ -119,4 +120,103 @@ class AsistenciaController extends Controller
         $perPage = $request->get('perPage', 10);
         return $this->asistenciaService->getAsistenciasPorDepartamento($departamentoId, $perPage);
     }
+
+    //--------------- Mertodohos Dahsboard -----------
+     /**
+     * Obtiene todas las asistencias registradas para el día actual.
+     * Incluye la información del empleado y el tipo de asistencia.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getAsistenciasHoy(Request $request)
+    {
+        try {
+            $today = Carbon::today();
+            // Carga las relaciones de empleado y tipoAsistencia para obtener sus datos directamente
+            $asistenciasHoy = Asistencia::with('empleado', 'tipoAsistencia')
+                                        ->whereDate('fecha', $today)
+                                        ->orderBy('hora_entrada', 'asc') // Opcional: ordenar por hora de entrada
+                                        ->get();
+
+            // Puedes formatear los datos si es necesario, o dejar que el frontend lo haga
+            $formattedAsistencias = $asistenciasHoy->map(function ($asistencia) {
+                return [
+                    'id' => $asistencia->id,
+                    'empleado' => $asistencia->empleado->getFullName(), // Usa el método del modelo Empleado
+                    'tipo_asistencia' => $asistencia->tipoAsistencia->nombre, // Nombre del tipo de asistencia
+                    'fecha' => $asistencia->getFechaFormatted(),
+                    'hora_entrada' => $asistencia->getHoraEntradaFormatted(),
+                    'hora_salida' => $asistencia->getHoraSalidaFormatted(),
+                    'observaciones' => $asistencia->getObservacionesFormatted(),
+                    'status' => $asistencia->getStatus(),
+                    'created_at' => $asistencia->created_at,
+                    'updated_at' => $asistencia->updated_at,
+                ];
+            });
+
+            return response()->json([
+                'message' => 'Asistencias del día de hoy obtenidas exitosamente.',
+                'data' => $formattedAsistencias
+            ], 200);
+
+        } catch (\Exception $e) {
+            // Log the error for debugging
+            //\Log::error("Error al obtener asistencias de hoy: " . $e->getMessage());
+            return response()->json([
+                'message' => 'Hubo un error al procesar tu solicitud para obtener las asistencias de hoy.',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtiene las últimas N asistencias registradas.
+     * Permite un parámetro 'limit' para controlar la cantidad de resultados.
+     * Incluye la información del empleado y el tipo de asistencia.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getLatestAsistencias(Request $request)
+    {
+        try {
+            // Validar que 'limit' sea un número entero y positivo
+            $limit = $request->query('limit', 10); // Valor por defecto: 10
+            $limit = max(1, (int)$limit); // Asegura que sea al menos 1
+
+            $latestAsistencias = Asistencia::with('empleado', 'tipoAsistencia')
+                                            ->orderBy('created_at', 'desc')
+                                            ->limit($limit)
+                                            ->get();
+
+            $formattedAsistencias = $latestAsistencias->map(function ($asistencia) {
+                return [
+                    'id' => $asistencia->id,
+                    'empleado' => $asistencia->empleado->getFullName(),
+                    'tipo_asistencia' => $asistencia->tipoAsistencia->nombre,
+                    'fecha' => $asistencia->getFechaFormatted(),
+                    'hora_entrada' => $asistencia->getHoraEntradaFormatted(),
+                    'hora_salida' => $asistencia->getHoraSalidaFormatted(),
+                    'observaciones' => $asistencia->getObservacionesFormatted(),
+                    'status' => $asistencia->getStatus(),
+                    'created_at' => $asistencia->created_at,
+                    'updated_at' => $asistencia->updated_at,
+                ];
+            });
+
+            return response()->json([
+                'message' => "Últimas {$limit} asistencias obtenidas exitosamente.",
+                'data' => $formattedAsistencias
+            ], 200);
+
+        } catch (\Exception $e) {
+            //\Log::error("Error al obtener las últimas asistencias: " . $e->getMessage());
+            return response()->json([
+                'message' => 'Hubo un error al procesar tu solicitud para obtener las últimas asistencias.',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
 }

@@ -22,6 +22,7 @@ trait NotificaEmpleado
             Notification::route('mail', $empleado->email)->notify($notificacion);
         } else {
             logger()->warning("Empleado sin correo ni usuario para notificar. ID: {$empleado->id}");
+            Notification::route('mail', env('MAIL_ADMIN_RH'));
         }
     }
 

@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Log;
+use Throwable;
 use Carbon\Carbon;
-use App\Traits\NotificaEmpleado;
+use App\Models\Empleado;
 use App\Models\Vacaciones;
 use App\Helpers\ApiResponse;
 use App\Models\Departamento;
@@ -11,15 +13,16 @@ use App\Models\CicloServicio;
 use App\Models\EstadoSolicitud;
 use Illuminate\Support\Facades\DB;
 use App\Models\VacacionesOfficiales;
+use Illuminate\Foundation\Auth\User;
 use App\Exceptions\BusinessException;
 use Illuminate\Notifications\Notification;
+use App\Notifications\NotificarEmpleadoEstadoSolicitud;
+use App\Notifications\NotificarEmpleadoSolicitudEnviada;
 use App\Exceptions\EmpleadosExceptions\EmpleadoNoEncontradoException;
 use App\Exceptions\VacacionesExceptions\VacacionNoEncontradaException;
 
 class VacacionesService
 {
-
-    use NotificaEmpleado;
     //correo srElixzabeth
     protected $emailAdminRH;
 
@@ -162,13 +165,27 @@ class VacacionesService
 
         $solicitud = Vacaciones::create($dataToCreate);
 
-        //notificar al empleado
-        $this->notificarEmpleado($empleado, new NotificarEmpleadoSolicitud($nuevoEstado, $solicitud));
-
+                // Notificar al empleado que su solicitud ha sido enviada
+        // Validar si el empleado tiene un correo electrónico antes de notificar
+        if ($empleado->email) { // Assuming your Empleado model has an 'email' field
+            try {
+                $empleado->notify(new NotificarEmpleadoSolicitudEnviada($solicitud));
+                //Log::info("Notificación de solicitud de vacaciones enviada al empleado: {$empleado->email}");
+            } catch (\Throwable $e) {
+                //Log::error("Error al enviar notificación al empleado {$empleado->id}: {$e->getMessage()}");
+                // Optionally, you could throw a BusinessException here
+                // throw new BusinessException("No se pudo enviar la notificación por correo electrónico al empleado.");
+            }
+        } else {
+           // Log::warning("El empleado {$empleado->id} no tiene un correo electrónico configurado. No se envió la notificación de solicitud de vacaciones.");
+            // You might want to add a message to the API response here
+            // or handle this scenario in the frontend if needed.
+        }
 
         // Notificar a Elizabeth (Admin RH)
-        $admin = User::where('email', $emailAdminRH)->first(); // cambia el correo real
+        $admin = User::where('email', $this->emailAdminRH)->first(); // cambia el correo real
         if ($admin) {
+            //Log::info("Envio de email a admin RH  new ERquest Vacation.");
             $admin->notify(new NotificarAdminSolicitudVacaciones($empleado));
         }
 
@@ -293,15 +310,22 @@ class VacacionesService
 
     public function delete($id)
     {
-        $solicitud = Vacaciones::findOrFail($id);
+        try{
+            $solicitud = Vacaciones::findOrFail($id);
 
-        // No permitir eliminar si está APROBADO, PENDIENTE
-        if (in_array(strtoupper($solicitud->estadoSolicitud->estado), ['APROBADO', 'PENDIENTE'])) {
-            throw new BusinessException('No se puede eliminar una solicitud que ya ha sido procesada (Aprobada, Pendiente).', 403);
+            // No permitir eliminar si está APROBADO, PENDIENTE
+            if (in_array(strtoupper($solicitud->estadoSolicitud->estado), ['APROBADO', 'PENDIENTE'])) {
+                throw new BusinessException('No se puede eliminar una solicitud que ya ha sido procesada (Aprobada, Pendiente).', 403);
+            }
+
+            $solicitud->delete();
+            return ApiResponse::success(['message' => 'Solicitud eliminada correctamente.']);
+        } catch (BusinessException $e) {
+            return ApiResponse::error($e->getMessage());
+        } catch (Throwable $e) {
+            //\Log::error("Error al actualizar perfil de usuario {$user->id}: " . $e->getMessage(), ['exception' => $e]);
+            return ApiResponse::serverError($e->getMessage());
         }
-
-        $solicitud->delete();
-        return ApiResponse::success(['message' => 'Solicitud eliminada correctamente.']);
     }
 
 
@@ -356,6 +380,7 @@ class VacacionesService
 
     public function cambiarEstado($id, string $estadoNombre)
     {
+
         $solicitud = Vacaciones::findOrFail($id);
 
         $estadoActual = strtoupper($solicitud->estadoSolicitud->estado);
@@ -401,7 +426,7 @@ class VacacionesService
 
         $estadoObj = EstadoSolicitud::where('estado', $nuevoEstado)->firstOrFail();
 
-        DB::beginTransaction();
+
         try {
             $updateData = [
                 'estado_solicitud_id' => $estadoObj->id,
@@ -420,8 +445,7 @@ class VacacionesService
             } else {
                 $updateData['fecha_aprobacion'] = null; // Default a null si no es aprobado
             }
-
-            $solicitud->update($updateData);
+                $solicitud->update($updateData);
 
             // Importante: La lógica de actualización del saldo (dias_vacaciones_disponibles)
             // se maneja en el registro de tipo 'ASIGNADO', no en la solicitud individual.
@@ -430,16 +454,33 @@ class VacacionesService
             // Ese campo es un "snapshot" de la disponibilidad al momento de la creación de la solicitud.
             // La disponibilidad actual siempre se recalcula dinámicamente en `getDisponibilidad`.
 
-            DB::commit();
-
-            //enviar notificacion
-            $this->notificarEmpleado($empleado, new NotificarEmpleadoSolicitud($nuevoEstado, $solicitud));
+                            // Notificar al empleado que su solicitud ha sido enviada
+        // Validar si el empleado tiene un correo electrónico antes de notificar
+        if ($solicitud->empleado->email) { // Assuming your Empleado model has an 'email' field
+            $empleado= $solicitud->empleado;
+            try {
+                $empleado->notify(new NotificarEmpleadoEstadoSolicitud($nuevoEstado, $solicitud));
+                //\Log::info("Notificación de solicitud de vacaciones enviada al empleado: {$empleado->email}");
+            } catch (\Throwable $e) {
+                //\Log::error("Error al enviar notificación al empleado {$empleado->id}: {$e->getMessage()}");
+                // Optionally, you could throw a BusinessException here
+                // throw new BusinessException("No se pudo enviar la notificación por correo electrónico al empleado.");
+            }
+        } else {
+           // \Log::warning("El empleado {$empleado->id} no tiene un correo electrónico configurado. No se envió la notificación de solicitud de vacaciones.");
+            // You might want to add a message to the API response here
+            // or handle this scenario in the frontend if needed.
+        }
 
 
             return ApiResponse::success($solicitud->fresh(), "Estado de la solicitud cambiado a {$nuevoEstado} correctamente.");
 
-        } catch (\Exception $e) {
-            DB::rollBack();
+        } catch (BusinessException $e) {
+            // Captura tu BusinessException para devolver una respuesta estandarizada.
+
+            return ApiResponse::error( $e->getMessage() );
+         } catch (\Exception $e) {
+
             throw new BusinessException('Error al cambiar el estado de la solicitud: ' . $e->getMessage(), 500);
         }
     }

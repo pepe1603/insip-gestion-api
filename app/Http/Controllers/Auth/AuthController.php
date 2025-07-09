@@ -17,6 +17,8 @@ use App\Notifications\LoginNotification;
 use App\Notifications\LogoutNotification;
 use App\Notifications\RegisterUserNotification;
 use App\Notifications\ResetPasswordCodeNotification;
+use App\Notifications\PasswordResetSuccessNotification;
+use App\Notifications\OtherDevicesLoggedOutNotification;
 use Illuminate\Support\Facades\Hash; // Para verificar contraseñas
 
 class AuthController extends Controller
@@ -29,7 +31,7 @@ class AuthController extends Controller
  * @param  \Illuminate\Http\Request  $request
  * @return \Illuminate\Http\JsonResponse
  */
-public function signIn(Request $request)
+public function register(Request $request)
 {
     try {
         $validated = $request->validate([
@@ -243,7 +245,7 @@ public function signIn(Request $request)
         Log::info('forgotPassword: Usuario encontrado.', ['user_id' => $user->id, 'user_email' => $user->email]);
 
         // Genera un token corto
-        $token = Str::random(6); // O rand(100000, 999999) si prefieres numérico puro
+        $token = rand(100000, 999999); // Str::random(6); // O rand(100000, 999999) si prefieres numérico puro
 
         Log::info('forgotPassword: Token generado.', ['token' => $token]);
 
@@ -359,6 +361,9 @@ public function signIn(Request $request)
         // Opcional: Revocar todos los tokens de Sanctum antiguos para el usuario
         $user->tokens()->delete();
 
+                // *** Envía la notificación de éxito de restablecimiento de contraseña ***
+        $user->notify(new PasswordResetSuccessNotification());
+
         return response()->json(['message' => 'Contraseña restablecida exitosamente.'], 200);
     }
 
@@ -387,8 +392,8 @@ public function signIn(Request $request)
                  ->where('id', '!=', $currentAccessTokenId)
                  ->delete();
 
-            // Opcional: Podrías enviar una notificación al usuario indicándole que sus sesiones fueron cerradas en otros dispositivos.
-            // $user->notify(new SessionsLoggedOutNotification());
+            // *** Envía la notificación de cierre de sesión en otros dispositivos ***
+            $user->notify(new OtherDevicesLoggedOutNotification());
 
             return ApiResponse::success('Sesión cerrada en todos los demás dispositivos exitosamente.', null, 200);
 
