@@ -181,6 +181,7 @@ Route::middleware('api')->group(function () {
         Route::prefix('empleados')->group(function () {
             Route::get('/', [EmpleadoController::class, 'index']);
             Route::get('/{id}', [EmpleadoController::class, 'show']);
+            Route::get('/{id}/antiguedad', [EmpleadoController::class, 'getAntiguedad']); // obtenr antiguedad del empelado
             Route::post('/', [EmpleadoController::class, 'store']);
             Route::put('/{id}', [EmpleadoController::class, 'update']);
             Route::patch('/{id}', [EmpleadoController::class, 'patch']);
@@ -265,11 +266,11 @@ Route::middleware('api')->group(function () {
                 Route::get('/recientes', [AsistenciaController::class, 'getLatestAsistencias']); // Renombrado a 'recientes'
             });
 
-            // Aquí podrías añadir más rutas específicas para el dashboard de otros módulos
-            // Ejemplo:
-            // Route::prefix('empleados')->group(function () {
-            //     Route::get('/activos-count', [EmpleadoController::class, 'getActiveEmployeesCount']);
-            // });
+        // Empleados para el Dashboard
+            Route::prefix('empleados')->group(function () {
+                Route::get('/status-counts', [EmpleadoController::class, 'getStatusCounts']); // Conteo de activos/inactivos
+                Route::get('/recien-ingresados', [EmpleadoController::class, 'getRecentlyHired']); // Empleados recién ingresados
+            });
         });
 
     });//fin del middleware 'auth:sanctum'

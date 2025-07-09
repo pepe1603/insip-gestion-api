@@ -2,9 +2,10 @@
 
 namespace App\Http\Controllers\Api\Empleados;
 
-use App\Http\Controllers\Controller;
+use App\Models\Empleado;
 use Illuminate\Http\Request;
 use App\Services\EmpleadoService;
+use App\Http\Controllers\Controller;
 
 class EmpleadoController extends Controller
 {
@@ -110,5 +111,44 @@ class EmpleadoController extends Controller
         ]);
 
         return $this->empleadoService->cambiarStatus($id, $data['status']);
+    }
+
+    //## Nuevos Métodos para Dashboard y Antigüedad
+
+    /**
+     * Obtiene el conteo de empleados por su estado para el dashboard.
+     * GET /api/dashboard/empleados/status-counts
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getStatusCounts()
+    {
+        return $this->empleadoService->getStatusCounts();
+    }
+
+    /**
+     * Obtiene los empleados recién contratados para el dashboard.
+     * GET /api/dashboard/empleados/recien-ingresados?days=X
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getRecentlyHired(Request $request)
+    {
+        $days = $request->query('days', 30); // Por defecto, últimos 30 días
+        $days = (int) $days; // Asegura que sea un entero
+        return $this->empleadoService->getRecentlyHired($days);
+    }
+
+    /**
+     * Obtiene la antigüedad de un empleado específico.
+     * GET /api/empleados/{id}/antiguedad
+     *
+     * @param  int  $id El ID del empleado.
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getAntiguedad($id)
+    {
+        return $this->empleadoService->getAntiguedad($id);
     }
 }
