@@ -272,14 +272,25 @@ Route::middleware('api')->group(function () {
                 Route::get('/recien-ingresados', [EmpleadoController::class, 'getRecentlyHired']); // Empleados recién ingresados
             });
 
-            // VAcaiones para elñ Dashboard
+            // Rutas  vacaiones para elñ Dashboard
             Route::prefix('vacaciones')->group(function () {
                 Route::get('/resumen-estados/{anio}', [VacacionesController::class, 'getResumenEstadosVacaciones']);
                 Route::get('/proximas', [VacacionesController::class, 'getProximasVacaciones']);
                 Route::get('/dias-por-mes/{anio}', [VacacionesController::class, 'getDiasVacacionesPorMes']);
-                Route::get('/disponibilidad-general', [VacacionesController::class, 'getDisponibilidadGeneralVacaciones']);
                 Route::get('/empleados/top-antiguos', [VacacionesController::class, 'getTopEmpleadosAntiguos']);
 
+            });
+
+             // Rutas de Usuarios para el Dashboard
+            Route::prefix('users')->group(function () {
+                // Cantidad total de usuarios
+                Route::get('/total', [UserController::class, 'getTotalUsersCount']);
+                // Conteo de usuarios por rol
+                Route::get('/by-role', [UserController::class, 'getUsersCountByRole']);
+                // Usuarios activos vs inactivos
+                Route::get('/active-vs-inactive', [UserController::class, 'getActiveInactiveUsersCount']);
+                // Usuarios recién registrados (ej. en los últimos 30 días)
+                Route::get('/recently-registered', [UserController::class, 'getRecentlyRegisteredUsers']);
             });
 
 

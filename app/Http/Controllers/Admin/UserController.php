@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Helpers\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
 use App\Models\User; // Importa el modelo User
 use Throwable; // Para capturar cualquier otra excepción inesperada
@@ -335,6 +336,97 @@ public function __construct()
                 ],
             ];
             return ApiResponse::serverError($response);
+        }
+    }
+
+    // Métodos para el Dashboard de Usuarios
+
+    /**
+     * Obtiene el conteo total de usuarios.
+     * GET /api/dashboard/users/total
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getTotalUsersCount()
+    {
+        try {
+            // Asumiendo que 'User' es el modelo para tus usuarios
+            $totalUsers = User::count();
+            return response()->json(
+            ['status'=> 200, 'total_users' => $totalUsers, 'message' => 'Conteo total de usuarios obtenido exitosamente.']);
+        } catch (\Exception $e) {
+            return ApiResponse::error('Error al obtener el conteo total de usuarios: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Obtiene el conteo de usuarios por cada rol.
+     * GET /api/dashboard/users/by-role
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getUsersCountByRole()
+    {
+        try {
+            $usersByRole = User::select('role', DB::raw('count(*) as count'))
+                               ->groupBy('role')
+                               ->get();
+
+            $formattedData = $usersByRole->mapWithKeys(function ($item) {
+                //acedemos al valor de la cadena del ENum
+                return [strtolower($item->role->value) => $item->count];
+            })->toArray();
+            return response()->json(
+                ['data' => $formattedData,'message'=> 'Conteo de usuarios por rol obtenido exitosamente.']);
+        } catch (\Exception $e) {
+            return ApiResponse::error('Error al obtener el conteo de usuarios por rol: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Obtiene el conteo de usuarios activos vs inactivos.
+     * GET /api/dashboard/users/active-vs-inactive
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getActiveInactiveUsersCount()
+    {
+        try {
+            $activeUsers = User::where('is_active', true)->count();
+            $inactiveUsers = User::where('is_active', false)->count();
+
+            return response()->json(
+                [
+                'active_users' => $activeUsers,
+                'inactive_users' => $inactiveUsers,
+            'message' => 'Conteo de usuarios activos e inactivos obtenido exitosamente.']);
+        } catch (\Exception $e) {
+            return ApiResponse::error('Error al obtener el conteo de usuarios activos/inactivos: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Obtiene una lista de usuarios registrados recientemente (ej. en los últimos 30 días).
+     * GET /api/dashboard/users/recently-registered
+     *
+     * @param \Illuminate\Http\Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getRecentlyRegisteredUsers(Request $request)
+    {
+        try {
+            $days = $request->input('days', 30); // Número de días a considerar, por defecto 30
+            $limit = $request->input('limit', 5); // Límite de usuarios a retornar, por defecto 5
+
+            $recentUsers = User::where('created_at', '>=', now()->subDays($days))
+                               ->orderBy('created_at', 'desc')
+                               ->limit($limit)
+                               ->get(['id', 'name', 'email', 'role', 'created_at']); // Selecciona solo los campos necesarios
+
+            return response()->json([
+                'data' => $recentUsers->toArray(),'message' => 'Usuarios registrados recientemente obtenidos exitosamente.']);
+        } catch (\Exception $e) {
+            return ApiResponse::error('Error al obtener usuarios registrados recientemente: ' . $e->getMessage(), 500);
         }
     }
 
