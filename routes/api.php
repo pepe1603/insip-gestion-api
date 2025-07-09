@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\Empleados\ReporteEmpleadoController;
 use App\Http\Controllers\Api\Asistencias\TipoAsistenciaController;
 use App\Http\Controllers\Api\Departamentos\DepartamentoController;
 use App\Http\Controllers\Api\Vacaciones\EstadoSolicitudController;
+use App\Http\Controllers\Api\Empleados\EmployeeDashboardController;
 use App\Http\Controllers\Api\Vacaciones\ReporteVacacionesController;
 use App\Http\Controllers\Api\Asistencias\ReporteAsistenciaController;
 use App\Http\Controllers\Api\Vacaciones\VacacionesOficialesController;
@@ -291,6 +292,15 @@ Route::middleware('api')->group(function () {
                 Route::get('/active-vs-inactive', [UserController::class, 'getActiveInactiveUsersCount']);
                 // Usuarios recién registrados (ej. en los últimos 30 días)
                 Route::get('/recently-registered', [UserController::class, 'getRecentlyRegisteredUsers']);
+            });
+
+            // --- NUEVAS RUTAS PARA EL DASHBOARD DEL EMPLEADO ---
+            Route::prefix('empleado-dashboard/{empleadoId}')->group(function () {
+                Route::get('vacaciones/disponibles', [EmployeeDashboardController::class, 'getDiasVacacionesDisponibles']);
+                Route::get('asistencias/ultima', [EmployeeDashboardController::class, 'getUltimaAsistencia']);
+                Route::get('antiguedad', [EmployeeDashboardController::class, 'getAntiguedad']);
+                Route::get('vacaciones/proxima-aprobada', [EmployeeDashboardController::class, 'getProximaVacacionAprobada']);
+                Route::get('solicitudes/pendientes', [EmployeeDashboardController::class, 'getSolicitudesPendientes']);
             });
 
 
