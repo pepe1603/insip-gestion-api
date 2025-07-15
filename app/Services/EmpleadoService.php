@@ -37,6 +37,15 @@ class EmpleadoService
     // Crear un nuevo empleado
     public function create(array $data)
     {
+        if (empty($data['email'])) {
+            throw new BusinessException("El correo electrónico del empleado es fundamental y no puede estar vacío.", 422);
+        }
+
+        //evitar email duplicado
+        if (Empleado::where('email', $data['email'])->exists()) {
+            return ApiResponse::error('El correo electrónico ya está en uso por otro empleado.', 422);
+        }
+
         // Validar duplicado por nombre completo y fecha ingreso
         if (Empleado::where('nombre', $data['nombre'])
             ->where('ape_paterno', $data['ape_paterno'])
@@ -68,6 +77,11 @@ class EmpleadoService
 
         if ($empleado->status !== 'ACTIVO') {
             throw new EmpleadoNoActivoException("El empleado no está activo.");
+        }
+
+        //validar emila duplicado
+        if (Empleado::where('email', $data['email'])->where('id', '!=', $id)->exists()) {
+            return ApiResponse::error('El correo electrónico ya está en uso por otro empleado.', 422);
         }
 
         // Validar duplicado si se están cambiando datos clave
@@ -184,6 +198,8 @@ class EmpleadoService
         $datos = $empleados->map(function ($empleado) {
             return [
                 'nombre_completo' => $empleado->nombre . ' ' . $empleado->ape_paterno . ' ' . $empleado->ape_materno,
+                'email' => $empleado->email,
+                'telefono' => $empleado->telefono,
                 'fecha_ingreso' => $empleado->fecha_ingreso,
                 'puesto' => $empleado->puesto,
                 'departamento' => $empleado->departamento->nombre ?? 'Sin departamento',

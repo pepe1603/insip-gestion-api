@@ -2,8 +2,9 @@
 
 namespace App\Http\Controllers\Api\Empleados;
 
-use App\Models\Empleado;
+use App\Models\Departamento;
 use Illuminate\Http\Request;
+use App\Models\Empleado;
 use App\Services\EmpleadoService;
 use App\Http\Controllers\Controller;
 
@@ -32,18 +33,18 @@ class EmpleadoController extends Controller
     // POST /api/empleados
     public function store(Request $request)
     {
-        $data = $request->validate([
-            'nombre'         => 'required|string|max:255',
-            'ape_paterno'    => 'required|string|max:255',
-            'ape_materno'    => 'required|string|max:255',
-            'fecha_ingreso'  => 'required|date',
-            'puesto'         => 'required|string|max:255',
-            'email'          => 'required|string|email|max:255|unique:empleados',
-            'telefono'        => 'string|max:25',
-            'departamento_id' => 'required|exists:departamentos,id',
-            'status'         => 'required|in:ACTIVO,INACTIVO',
-            'tipo_contrato'  => 'required|in:TIEMPO_COMPLETO,MEDIO_TIEMPO,TEMPORAL',
-        ]);
+            $data = $request->validate([
+                'nombre'            => 'required|string|max:255',
+                'ape_paterno'       => 'required|string|max:255',
+                'ape_materno'       => 'required|string|max:255',
+                'fecha_ingreso'     => 'required|date',
+                'puesto'            => 'required|string|max:255',
+                'email'             => 'required|string|email|max:255|unique:empleados',
+                'telefono'          => 'string|max:25',
+                'departamento_id'   => 'required|exists:departamentos,id',
+                'status'            => 'required|in:ACTIVO,INACTIVO',
+                'tipo_contrato'     => 'required|in:TIEMPO_COMPLETO,MEDIO_TIEMPO,TEMPORAL',
+            ]);
 
         return $this->empleadoService->create($data);
     }
@@ -56,6 +57,8 @@ class EmpleadoController extends Controller
             'ape_paterno'    => 'required|string|max:255',
             'ape_materno'    => 'required|string|max:255',
             'fecha_ingreso'  => 'required|date',
+            'email'          => 'string|email|max:255|unique:empleados,email,' . $id,
+            'telefono'       => 'string|max:25',
             'puesto'         => 'required|string|max:255',
             'departamento_id' => 'required|exists:departamentos,id',
             'status'         => 'required|in:ACTIVO,INACTIVO',

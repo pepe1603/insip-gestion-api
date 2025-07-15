@@ -48,6 +48,9 @@ Route::middleware('api')->group(function () {
     Route::post('/verify-reset-code', [AuthController::class, 'verifyResetCode']); // <-- ¡NUEVA RUTA para verificar!
     Route::post('/reset-password', [AuthController::class, 'resetPassword']);     // Restablece con el código
 
+    // --- Ruta para Cambio de Contraseña Forzado ---
+    Route::post('/auth/force-password-change', [AuthController::class, 'forcePasswordChange'])
+        ->middleware('auth:sanctum'); // Protegida con token y habilidad
 
 
 /*
@@ -76,7 +79,6 @@ Route::middleware('api')->group(function () {
 
         //verifica email manualmente lalmando a esste endpoint dessde  unbtn ene l frontend
         Route::post('/verify-email', [AuthController::class, 'markEmailAsVerified']);
-
 
          // Nueva ruta para registrar usuario (protegida y con chequeo de rol)
 
@@ -155,6 +157,8 @@ Route::middleware('api')->group(function () {
             Route::get('/{id}', [AsistenciaController::class, 'show']);
             Route::put('/{id}', [AsistenciaController::class, 'update']);
             Route::delete('/{id}', [AsistenciaController::class, 'destroy']);
+            Route::get('/por-empleado/{id}', [AsistenciaController::class, 'porEmpleado']);
+
 
         });
 
@@ -254,57 +258,47 @@ Route::middleware('api')->group(function () {
 
         });
 
-        /*
-        *## Rutas Específicas para el Dashboard
-        */
-        // Agrupa las rutas del dashboard bajo un prefijo claro
-        Route::prefix('dashboard')->group(function () {
-            // Asistencias para el Dashboard
-            Route::prefix('asistencias')->group(function () {
-                // Endpoint para obtener las asistencias del día
-                Route::get('/hoy', [AsistenciaController::class, 'getAsistenciasHoy']);
-                // Endpoint para obtener las últimas asistencias registradas (para un feed de actividad)
-                Route::get('/recientes', [AsistenciaController::class, 'getLatestAsistencias']); // Renombrado a 'recientes'
-            });
 
-        // Empleados para el Dashboard
-            Route::prefix('empleados')->group(function () {
-                Route::get('/status-counts', [EmpleadoController::class, 'getStatusCounts']); // Conteo de activos/inactivos
-                Route::get('/recien-ingresados', [EmpleadoController::class, 'getRecentlyHired']); // Empleados recién ingresados
-            });
-
-            // Rutas  vacaiones para elñ Dashboard
-            Route::prefix('vacaciones')->group(function () {
-                Route::get('/resumen-estados/{anio}', [VacacionesController::class, 'getResumenEstadosVacaciones']);
-                Route::get('/proximas', [VacacionesController::class, 'getProximasVacaciones']);
-                Route::get('/dias-por-mes/{anio}', [VacacionesController::class, 'getDiasVacacionesPorMes']);
-                Route::get('/empleados/top-antiguos', [VacacionesController::class, 'getTopEmpleadosAntiguos']);
-
-            });
-
-             // Rutas de Usuarios para el Dashboard
-            Route::prefix('users')->group(function () {
-                // Cantidad total de usuarios
-                Route::get('/total', [UserController::class, 'getTotalUsersCount']);
-                // Conteo de usuarios por rol
-                Route::get('/by-role', [UserController::class, 'getUsersCountByRole']);
-                // Usuarios activos vs inactivos
-                Route::get('/active-vs-inactive', [UserController::class, 'getActiveInactiveUsersCount']);
-                // Usuarios recién registrados (ej. en los últimos 30 días)
-                Route::get('/recently-registered', [UserController::class, 'getRecentlyRegisteredUsers']);
-            });
-
-            // --- NUEVAS RUTAS PARA EL DASHBOARD DEL EMPLEADO ---
-            Route::prefix('empleado-dashboard/{empleadoId}')->group(function () {
-                Route::get('vacaciones/disponibles', [EmployeeDashboardController::class, 'getDiasVacacionesDisponibles']);
-                Route::get('asistencias/ultima', [EmployeeDashboardController::class, 'getUltimaAsistencia']);
-                Route::get('antiguedad', [EmployeeDashboardController::class, 'getAntiguedad']);
-                Route::get('vacaciones/proxima-aprobada', [EmployeeDashboardController::class, 'getProximaVacacionAprobada']);
-                Route::get('solicitudes/pendientes', [EmployeeDashboardController::class, 'getSolicitudesPendientes']);
-            });
-
-
+    // --- Rutas para el Dashboard de Administración (LayoutAdmin) ---
+    Route::prefix('dashboard-admin')->group(function () { // Cambio de 'dashboard' a 'dashboard-admin'
+        // Asistencias para el Dashboard Admin
+        Route::prefix('asistencias')->group(function () {
+            Route::get('/hoy', [AsistenciaController::class, 'getAsistenciasHoy']);
+            Route::get('/recientes', [AsistenciaController::class, 'getLatestAsistencias']);
         });
+
+        // Empleados para el Dashboard Admin
+        Route::prefix('empleados')->group(function () {
+            Route::get('/status-counts', [EmpleadoController::class, 'getStatusCounts']);
+            Route::get('/recien-ingresados', [EmpleadoController::class, 'getRecentlyHired']);
+        });
+
+        // Vacaciones para el Dashboard Admin
+        Route::prefix('vacaciones')->group(function () {
+            Route::get('/resumen-estados/{anio}', [VacacionesController::class, 'getResumenEstadosVacaciones']);
+            Route::get('/proximas', [VacacionesController::class, 'getProximasVacaciones']);
+            Route::get('/dias-por-mes/{anio}', [VacacionesController::class, 'getDiasVacacionesPorMes']);
+            Route::get('/empleados/top-antiguos', [VacacionesController::class, 'getTopEmpleadosAntiguos']);
+        });
+
+        // Usuarios para el Dashboard Admin
+        Route::prefix('users')->group(function () {
+            Route::get('/total', [UserController::class, 'getTotalUsersCount']);
+            Route::get('/by-role', [UserController::class, 'getUsersCountByRole']);
+            Route::get('/active-vs-inactive', [UserController::class, 'getActiveInactiveUsersCount']);
+            Route::get('/recently-registered', [UserController::class, 'getRecentlyRegisteredUsers']);
+        });
+    });
+
+    // --- Rutas para el Dashboard del Empleado (LayoutEmpleado) ---
+    Route::prefix('empleado-dashboard/{empleadoId}')->group(function () {
+        Route::get('vacaciones/disponibles', [EmployeeDashboardController::class, 'getDiasVacacionesDisponibles']);
+        Route::get('asistencias/ultima', [EmployeeDashboardController::class, 'getUltimaAsistencia']);
+        Route::get('antiguedad', [EmployeeDashboardController::class, 'getAntiguedad']);
+        Route::get('vacaciones/proxima-aprobada', [EmployeeDashboardController::class, 'getProximaVacacionAprobada']);
+        Route::get('solicitudes/pendientes', [EmployeeDashboardController::class, 'getSolicitudesPendientes']);
+    });
+
 
     });//fin del middleware 'auth:sanctum'
 });//Find el Middleware 'api

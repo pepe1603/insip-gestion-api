@@ -26,6 +26,8 @@ class User extends Authenticatable
         'password',
         'role',
         'is_active',
+        'empleado_id', // Asegúrate de que empleado_id también esté aquí si lo usas en create/update
+        'must_change_password', // ¡Añadido!
     ];
 
     public function empleado()
@@ -56,6 +58,8 @@ class User extends Authenticatable
             'password' => 'hashed',
             'is_active' => 'boolean',
             'role' => UserRole::class,
+            'must_change_password' => 'boolean', // ¡Opcional pero recomendado para casting!
+
         ];
     }
 

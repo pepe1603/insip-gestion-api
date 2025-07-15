@@ -42,7 +42,7 @@ class VacacionesService
     public function find($id)
     {
         //retonamos la salicitud con sus relaciones y el ciclo de servicio inluido el nombre
-        $solicitud = Vacaciones::with('empleado', 'estadoSolicitud', 'cicloServicio.anio')->findOrFail($id);
+        $solicitud = Vacaciones::with('empleado', 'estadoSolicitud', 'cicloServicio')->findOrFail($id);
         return ApiResponse::success($solicitud);
     }
 
