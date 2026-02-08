@@ -21,3 +21,11 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+
+/node_modules
+/vendor
+.env
+.env.*
+storage/logs/*
+storage/framework/*
+public/storage
