@@ -20,268 +20,208 @@ use App\Http\Controllers\Api\Vacaciones\ReporteVacacionesController;
 use App\Http\Controllers\Api\Asistencias\ReporteAsistenciaController;
 use App\Http\Controllers\Api\Vacaciones\VacacionesOficialesController;
 
-// Envolver todo dentro del middleware 'api'
-// y el prefijo 'api' para las rutas de la API
-// y asegurarse de que las rutas estén agrupadas correctamente para evitar conflictos dde nombres
-// y mantener una estructura clara y organizada evitando que cuando ocurra un error
-// se confunda con el nombre de la ruta y el controlador lanze un error/excepción
-// y no se confunda con el nombre de la ruta y el controlador
-Route::middleware('api')->group(function () {
+/*
+|--------------------------------------------------------------------------
+| API Routes
+|--------------------------------------------------------------------------
+*/
 
 /*
 |-------------------------------------------------------------------------------------------------------
-| PUblics Routes (Rutas publicxas)
+| Public Routes (Rutas públicas)
 |-------------------------------------------------------------------------------------------------------
-| Estas rutas no reuqieren autheticacion.
+| Estas rutas no requieren autenticación.
 */
-    Route::get('/example', function () {
-        return response()->json(['message' => 'Hello, world!']);
-    });
-    //---------------- section de la API ------------------
-    Route::get('/info', [ApiController::class, 'info']);
-    Route::get('/version', [ApiController::class, 'info']); // Alias para info
 
-    //rutas de authenticacion
-    Route::post('/login', [AuthController::class, 'login'] );
-    Route::post('/register', [AuthController::class, 'register'] );
-    Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:5,1'); // Limitación de 5 intentos por minuto por IP // Nueva ruta para recuperación
-    Route::post('/verify-reset-code', [AuthController::class, 'verifyResetCode']); // <-- ¡NUEVA RUTA para verificar!
-    Route::post('/reset-password', [AuthController::class, 'resetPassword']);     // Restablece con el código
+// Endpoint de Verificación de Estado de Salud
+Route::match(['OPTIONS'], '/health', function () {
+    return response('', 200)
+        ->header('Access-Control-Allow-Origin', '*')
+        ->header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS')
+        ->header('Access-Control-Allow-Headers', 'Content-Type, X-Requested-With');
+});
 
-    // --- Ruta para Cambio de Contraseña Forzado ---
-    Route::post('/auth/force-password-change', [AuthController::class, 'forcePasswordChange'])
-        ->middleware('auth:sanctum'); // Protegida con token y habilidad
+Route::match(['GET', 'HEAD'], '/health', function () {
+    return response()->json(['status' => 'ok', 'message' => 'API is healthy'], 200)
+            ->header('Access-Control-Allow-Origin', '*')
+            ->header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS')
+            ->header('Access-Control-Allow-Headers', 'Content-Type, X-Requested-With');
+});
+
+// Endpoint público para obtener el estado de la API
+Route::get('/status', [ApiController::class, 'getStatus']);
+
+// Rutas de información de la API
+Route::get('/example', function () {
+    return response()->json(['message' => 'Hello, world!']);
+});
+Route::get('/info', [ApiController::class, 'info']);
+Route::get('/version', [ApiController::class, 'info']); // Alias para info
+
+// Rutas de autenticación
+Route::post('/login', [AuthController::class, 'login']);
+Route::post('/register', [AuthController::class, 'register']);
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:5,1'); // Limitación de 5 intentos por minuto por IP
+Route::post('/verify-reset-code', [AuthController::class, 'verifyResetCode']);
+Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+Route::post('/auth/force-password-change', [AuthController::class, 'forcePasswordChange'])->middleware('auth:sanctum');
 
 
 /*
 |-------------------------------------------------------------------------------------------------------
 | Protected Routes (Rutas protegidas)
 |-------------------------------------------------------------------------------------------------------
-| Estas rutas reuqieren un token de Sanctum valido.
+| Estas rutas requieren un token de Sanctum válido.
 */
 
-    //Ruta para cerrar sesion (requerira el token para saber que token revocar , invalidar)
-    Route::middleware(['auth:sanctum'])->group(function () {
-        //rutas protegidas por sanctum
+Route::middleware(['auth:sanctum'])->group(function () {
+    // Rutas protegidas por sanctum
 
-            // Opcional: Ruta para obtener el usuario autenticado (requiere token) --> esssto ya lo maneja ñla ruta profile contrller@show
-        /* por sweguridda usamno enle metodo show de profile controllerr
-        Route::get('/me', function (Request $request) {
-            return $request->user();
-        });
-        */
+    // Ruta para cerrar sesión
+    Route::get('/logout', [AuthController::class, 'logout']);
+    Route::post('/logout-other-devices', [AuthController::class, 'logoutOtherDevices']);
+    Route::post('/verify-email', [AuthController::class, 'markEmailAsVerified']);
 
-        // Ruta para cerrar sesión es necesario recibir el token
-        Route::get('/logout', [AuthController::class, 'logout']);
+    // --- GRUPO DE RUTAS PARA ADMINISTRACIÓN (protegidas por roles) ---
+    Route::prefix('admin')->group(function () {
+        Route::apiResource('users', UserController::class);
+        Route::patch('users/{user}/toggle-active', [UserController::class, 'toggleActive']);
+    });
 
-        // Nueva ruta para cerrar sesión en otros dispositivos
-        Route::post('/logout-other-devices', [AuthController::class, 'logoutOtherDevices']);
+    // --- GRUPO DE RUTAS PARA EL PERFIL DEL USUARIO AUTENTICADO ---
+    Route::prefix('profile')->group(function () {
+        Route::get('/me', [ProfileController::class, 'show']);
+        Route::patch('/', [ProfileController::class, 'update']);
+        Route::patch('/password', [ProfileController::class, 'updatePassword']);
+        Route::get('/dashboard-info', [ProfileController::class, 'dashboardInfo']);
+    });
 
-        //verifica email manualmente lalmando a esste endpoint dessde  unbtn ene l frontend
-        Route::post('/verify-email', [AuthController::class, 'markEmailAsVerified']);
+    // Rutas para Tipos de Asistencia
+    Route::prefix('tipos-asistencia')->group(function () {
+        Route::get('/', [TipoAsistenciaController::class, 'index']);
+        Route::get('/{id}', [TipoAsistenciaController::class, 'show']);
+        Route::post('/', [TipoAsistenciaController::class, 'store']);
+        Route::put('/{id}', [TipoAsistenciaController::class, 'update']);
+        Route::patch('/{id}', [TipoAsistenciaController::class, 'patch']);
+        Route::delete('/{id}', [TipoAsistenciaController::class, 'destroy']);
+    });
 
-         // Nueva ruta para registrar usuario (protegida y con chequeo de rol)
+    // Rutas para Departamentos
+    Route::prefix('departamentos')->group(function () {
+        Route::get('/', [DepartamentoController::class, 'index']);
+        Route::get('/generar-reporte', [DepartamentoController::class, 'exportarDepartamentos']);
+        Route::get('/{id}', [DepartamentoController::class, 'show']);
+        Route::post('/', [DepartamentoController::class, 'store']);
+        Route::put('/{id}', [DepartamentoController::class, 'update']);
+        Route::patch('/{id}', [DepartamentoController::class, 'patch']);
+        Route::delete('/{id}', [DepartamentoController::class, 'destroy']);
+    });
 
-        // --- GRUPO DE RUTAS PARA ADMINISTRACIÓN (protegidas por roles) ---
-        Route::prefix('admin')->group(function () {
-            // Route::apiResource genera las 7 rutas RESTful estándar para 'users':
-            // GET      /api/admin/users             -> UserController@index
-            // POST     /api/admin/users             -> UserController@store
-            // GET      /api/admin/users/{user}      -> UserController@show
-            // PUT/PATCH /api/admin/users/{user}     -> UserController@update
-            // DELETE   /api/admin/users/{user}      -> UserController@destroy
-            Route::apiResource('users', UserController::class);
+    // Rutas para Estados de Solicitud
+    Route::prefix('estados-solicitud')->group(function () {
+        Route::get('/', [EstadoSolicitudController::class, 'index']);
+        Route::get('/{id}', [EstadoSolicitudController::class, 'show']);
+        Route::post('/', [EstadoSolicitudController::class, 'store']);
+        Route::put('/{id}', [EstadoSolicitudController::class, 'update']);
+        Route::patch('/{id}', [EstadoSolicitudController::class, 'patch']);
+        Route::delete('/{id}', [EstadoSolicitudController::class, 'destroy']);
+    });
 
-            // Nueva ruta específica para activar/desactivar usuario
-            // Es crucial que esta ruta vaya DESPUÉS de Route::apiResource
-            // para evitar conflictos con la ruta show (users/{user}).
-            Route::patch('users/{user}/toggle-active', [UserController::class, 'toggleActive']);
-        });
+    // Rutas para Vacaciones Oficiales
+    Route::prefix('vacaciones-oficiales')->group(function () {
+        Route::get('/', [VacacionesOficialesController::class, 'index']);
+        Route::get('/{id}', [VacacionesOficialesController::class, 'show']);
+        Route::post('/', [VacacionesOficialesController::class, 'store']);
+        Route::put('/{id}', [VacacionesOficialesController::class, 'update']);
+        Route::patch('/{id}', [VacacionesOficialesController::class, 'patch']);
+        Route::delete('/{id}', [VacacionesOficialesController::class, 'destroy']);
+    });
 
-        // --- GRUPO DE RUTAS PARA EL PERFIL DEL USUARIO AUTENTICADO ---
-        // No requieren un middleware de rol específico, solo autenticación.
-        Route::prefix('profile')->group(function () {
-            Route::get('/me', [ProfileController::class, 'show']);             // Obtener perfil del usuario logueado
-            Route::patch('/', [ProfileController::class, 'update']);         // Actualizar perfil (solo datos)
-            Route::patch('/password', [ProfileController::class, 'updatePassword']); // Actualizar contraseña
-            Route::get('/dashboard-info', [ProfileController::class, 'dashboardInfo']); // Info para frontend
-        });
+    // Rutas de Asistencias
+    Route::prefix('asistencias')->group(function () {
+        Route::get('/', [AsistenciaController::class, 'index']);
+        Route::post('/', [AsistenciaController::class, 'store']);
+        Route::get('/{id}', [AsistenciaController::class, 'show']);
+        Route::put('/{id}', [AsistenciaController::class, 'update']);
+        Route::delete('/{id}', [AsistenciaController::class, 'destroy']);
+        Route::get('/por-empleado/{id}', [AsistenciaController::class, 'porEmpleado']);
+    });
 
+    Route::prefix('reporte-asistencias')->group(function () {
+        Route::get('/exportar', [ReporteAsistenciaController::class, 'exportarTodo']);
+        Route::get('/por-rango', [ReporteAsistenciaController::class, 'porRangoFechas']);
+        Route::get('/por-fecha', [ReporteAsistenciaController::class, 'porFecha']);
+        Route::get('/por-mes', [ReporteAsistenciaController::class, 'porMes']);
+        Route::get('/por-tipo-asistencia', [ReporteAsistenciaController::class, 'porTipoAsistencia']);
+        Route::get('/por-empleado', [ReporteAsistenciaController::class, 'porEmpleado']);
+        Route::get('/por-empleado-fecha', [ReporteAsistenciaController::class, 'porEmpleadoYFecha']);
+    });
 
-         // Rutas para Tipos de Asistencia
-        Route::prefix('tipos-asistencia')->group(function () {
-            Route::get('/', [TipoAsistenciaController::class, 'index']);
-            Route::get('/{id}', [TipoAsistenciaController::class, 'show']);
-            Route::post('/', [TipoAsistenciaController::class, 'store']);
-            Route::put('/{id}', [TipoAsistenciaController::class, 'update']);
-            Route::patch('/{id}', [TipoAsistenciaController::class, 'patch']);
-            Route::delete('/{id}', [TipoAsistenciaController::class, 'destroy']);
-        });
+    // Rutas de Empleados
+    Route::prefix('empleados')->group(function () {
+        Route::get('/', [EmpleadoController::class, 'index']);
+        Route::get('/{id}', [EmpleadoController::class, 'show']);
+        Route::get('/{id}/antiguedad', [EmpleadoController::class, 'getAntiguedad']);
+        Route::post('/', [EmpleadoController::class, 'store']);
+        Route::put('/{id}', [EmpleadoController::class, 'update']);
+        Route::patch('/{id}', [EmpleadoController::class, 'patch']);
+        Route::delete('/{id}', [EmpleadoController::class, 'destroy']);
+        Route::get('/departamento/{departamentoId}', [EmpleadoController::class, 'porDepartamento']);
+        Route::get('/activos', [EmpleadoController::class, 'activos']);
+        Route::get('/buscar', [EmpleadoController::class, 'buscar']);
+        Route::put('/{id}/cambiar-status', [EmpleadoController::class, 'cambiarStatus']);
+    });
 
-        // Rutas para Departamentos
-        Route::prefix('departamentos')->group(function () {
-            Route::get('/', [DepartamentoController::class, 'index']);
-            Route::get('/generar-reporte', [DepartamentoController::class, 'exportarDepartamentos']);
-            Route::get('/{id}', [DepartamentoController::class, 'show']);
-            Route::post('/', [DepartamentoController::class, 'store']);
-            Route::put('/{id}', [DepartamentoController::class, 'update']);
-            Route::patch('/{id}', [DepartamentoController::class, 'patch']);
-            Route::delete('/{id}', [DepartamentoController::class, 'destroy']);
-        });
+    Route::prefix('reporte-empleados')->group(function () {
+        Route::get('/exportar', [ReporteEmpleadoController::class, 'exportarReporte']);
+    });
 
-        // Rutas para Estados de Solicitud
-        Route::prefix('estados-solicitud')->group(function () {
-            Route::get('/', [EstadoSolicitudController::class, 'index']);
-            Route::get('/{id}', [EstadoSolicitudController::class, 'show']);
-            Route::post('/', [EstadoSolicitudController::class, 'store']);
-            Route::put('/{id}', [EstadoSolicitudController::class, 'update']);
-            Route::patch('/{id}', [EstadoSolicitudController::class, 'patch']);
-            Route::delete('/{id}', [EstadoSolicitudController::class, 'destroy']);
-        });
-
-        // Rutas para Vacaciones Oficiales por legislación
-        Route::prefix('vacaciones-oficiales')->group(function () {
-            Route::get('/', [VacacionesOficialesController::class, 'index']);
-            Route::get('/{id}', [VacacionesOficialesController::class, 'show']);
-            Route::post('/', [VacacionesOficialesController::class, 'store']);
-            Route::put('/{id}', [VacacionesOficialesController::class, 'update']);
-            Route::patch('/{id}', [VacacionesOficialesController::class, 'patch']);
-            Route::delete('/{id}', [VacacionesOficialesController::class, 'destroy']);
-        });
-
-        //---------------- section asistencias -----------------
-
-        Route::prefix('asistencias')->group(function () {
-            Route::get('/', [AsistenciaController::class, 'index']);
-            Route::post('/', [AsistenciaController::class, 'store']);
-            Route::get('/{id}', [AsistenciaController::class, 'show']);
-            Route::put('/{id}', [AsistenciaController::class, 'update']);
-            Route::delete('/{id}', [AsistenciaController::class, 'destroy']);
-            Route::get('/por-empleado/{id}', [AsistenciaController::class, 'porEmpleado']);
-
-
-        });
-
-        Route::prefix('reporte-asistencias')->group(function () {
-            Route::get('/exportar', [ReporteAsistenciaController::class, 'exportarTodo']);
-            Route::get('/por-rango', [ReporteAsistenciaController::class, 'porRangoFechas']);
-            Route::get('/por-fecha', [ReporteAsistenciaController::class, 'porFecha']);
-            Route::get('/por-mes', [ReporteAsistenciaController::class, 'porMes']);
-            Route::get('/por-tipo-asistencia', [ReporteAsistenciaController::class, 'porTipoAsistencia']);
-            Route::get('/por-empleado', [ReporteAsistenciaController::class, 'porEmpleado']);
-            Route::get('/por-empleado-fecha', [ReporteAsistenciaController::class, 'porEmpleadoYFecha']);
-        });
-
-        /*
-        * Ejemplos de cómo se usan ahora:
-            GET /api/reporte-asistencias/por-empleado?empleado_id=2&format=pdf
-
-            GET /api/reporte-asistencias/por-mes?anio=2024&mes=4&format=excel
-
-            GET /api/reporte-asistencias/por-rango?fecha_inicio=2024-04-01&fecha_fin=2024-04-30&format=csv
-        */
-
-        //----------------- section de empleados -----------------
-
-        Route::prefix('empleados')->group(function () {
-            Route::get('/', [EmpleadoController::class, 'index']);
-            Route::get('/{id}', [EmpleadoController::class, 'show']);
-            Route::get('/{id}/antiguedad', [EmpleadoController::class, 'getAntiguedad']); // obtenr antiguedad del empelado
-            Route::post('/', [EmpleadoController::class, 'store']);
-            Route::put('/{id}', [EmpleadoController::class, 'update']);
-            Route::patch('/{id}', [EmpleadoController::class, 'patch']);
-            Route::delete('/{id}', [EmpleadoController::class, 'destroy']);
-            Route::get('/departamento/{departamentoId}', [EmpleadoController::class, 'porDepartamento']);
-            Route::get('/activos', [EmpleadoController::class, 'activos']);
-            Route::get('/buscar', [EmpleadoController::class, 'buscar']);
-            Route::put('/{id}/cambiar-status', [EmpleadoController::class, 'cambiarStatus']);
-        });
-
-        Route::prefix('reporte-empleados')->group(function () {
-            // Rutas existentes para empleados...
-            // Ruta para exportar el reporte de empleados
-            Route::get('/exportar', [ReporteEmpleadoController::class, 'exportarReporte']);
-        });
-
-        //---------------- section de vacaciones ------------------
-
-        Route::prefix('vacaciones')->group(function () {
-            Route::get('/', [VacacionesController::class, 'index']);
-            Route::post('/', [VacacionesController::class, 'store']);
-            Route::get('/pendientes', [VacacionesController::class, 'pendientes'])->name('vacaciones.pendientes');
-
-            Route::get('/{id}', [VacacionesController::class, 'show']);
-            Route::put('/{id}', [VacacionesController::class, 'update']);
-            Route::delete('/{id}', [VacacionesController::class, 'destroy']);
-
-            Route::post('/{id}/aprobar', [VacacionesController::class, 'aprobar']);
-            Route::post('/{id}/rechazar', [VacacionesController::class, 'rechazar']);
-            Route::post('/{id}/cancelar', [VacacionesController::class, 'cancelar']);
-
-            // Rutas para obtener vacaciones por diferentes criterios
-
-            Route::get('/empleado/{empleadoId}', [VacacionesController::class, 'porEmpleado']);
-            Route::get('/estado/{estadoId}', [VacacionesController::class, 'porEstado']);
-            Route::get('/periodo/{desde}/{hasta}', [VacacionesController::class, 'porPeriodo']);
-            Route::get('/disponibilidad/{empleadoId}', [VacacionesController::class, 'getDisponibilidad']);
-            // ¡NUEVA RUTA para inicializar vacaciones históricas!
+    // Rutas de Vacaciones
+    Route::prefix('vacaciones')->group(function () {
+        Route::get('/', [VacacionesController::class, 'index']);
+        Route::post('/', [VacacionesController::class, 'store']);
+        Route::get('/pendientes', [VacacionesController::class, 'pendientes'])->name('vacaciones.pendientes');
+        Route::get('/{id}', [VacacionesController::class, 'show']);
+        Route::put('/{id}', [VacacionesController::class, 'update']);
+        Route::delete('/{id}', [VacacionesController::class, 'destroy']);
+        Route::post('/{id}/aprobar', [VacacionesController::class, 'aprobar']);
+        Route::post('/{id}/rechazar', [VacacionesController::class, 'rechazar']);
+        Route::post('/{id}/cancelar', [VacacionesController::class, 'cancelar']);
+        Route::get('/empleado/{empleadoId}', [VacacionesController::class, 'porEmpleado']);
+        Route::get('/estado/{estadoId}', [VacacionesController::class, 'porEstado']);
+        Route::get('/periodo/{desde}/{hasta}', [VacacionesController::class, 'porPeriodo']);
+        Route::get('/disponibilidad/{empleadoId}', [VacacionesController::class, 'getDisponibilidad']);
         Route::post('/inicializar-historico', [VacacionesController::class, 'inicializarVacacionesHistoricas']);
-        // Nueva ruta para consultar disponibilidad
-            Route::get('/disponibilidad', [VacacionesController::class, 'consultarDisponibilidad']);
+        Route::get('/disponibilidad', [VacacionesController::class, 'consultarDisponibilidad']);
+    });
 
-        });
-
-        // --- seccion de Reporte de vaciones
-
-        Route::prefix('reporte-vacaciones')->group(function() {
-
-            // Ejemplo de uso: /api/reporte-vacaciones/empleado-ciclo?empleado_id=1&ciclo=2024
-            Route::get('/empleado-ciclo', [ReporteVacacionesController::class, 'porEmpleadoYCiclo']);
-
-            // Ejemplo de uso: /api/reporte-vacaciones/departamento?departamento_id=1
-            Route::get('/departamento', [ReporteVacacionesController::class, 'porDepartamento']);
-
-            // Ejemplo de uso: /api/reporte-vacaciones/dias-tomados-mes?año=2024
-            Route::get('/dias-tomados-mes', [ReporteVacacionesController::class, 'porDiasTomadosPorMes']);
-
-            // Ejemplo de uso: /api/reporte-vacaciones/dias-tomados-semana?año=2024
-            Route::get('/dias-tomados-semana', [ReporteVacacionesController::class, 'porDiasTomadosPorSemana']);
-
-            // Ejemplo de uso: /api/reporte-vacaciones/periodo?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
-            Route::get('/periodo', [ReporteVacacionesController::class, 'porPeriodo']);
-
-                    // Ejemplo de uso: /api/reporte-vacaciones/resumen
-            Route::get('/resumen', [ReporteVacacionesController::class, 'porResumenVacacionesSolicitadas']);
-
-            // Ejemplo de uso: /api/reporte-vacaciones/top-empleados?limit=10
-            Route::get('/top-empleados', [ReporteVacacionesController::class, 'porTopEmpleados']);
-
-        });
-
+    // Seccion de Reporte de vaciones
+    Route::prefix('reporte-vacaciones')->group(function () {
+        Route::get('/empleado-ciclo', [ReporteVacacionesController::class, 'porEmpleadoYCiclo']);
+        Route::get('/departamento', [ReporteVacacionesController::class, 'porDepartamento']);
+        Route::get('/dias-tomados-mes', [ReporteVacacionesController::class, 'porDiasTomadosPorMes']);
+        Route::get('/dias-tomados-semana', [ReporteVacacionesController::class, 'porDiasTomadosPorSemana']);
+        Route::get('/periodo', [ReporteVacacionesController::class, 'porPeriodo']);
+        Route::get('/resumen', [ReporteVacacionesController::class, 'porResumenVacacionesSolicitadas']);
+        Route::get('/top-empleados', [ReporteVacacionesController::class, 'porTopEmpleados']);
+    });
 
     // --- Rutas para el Dashboard de Administración (LayoutAdmin) ---
-    Route::prefix('dashboard-admin')->group(function () { // Cambio de 'dashboard' a 'dashboard-admin'
-        // Asistencias para el Dashboard Admin
+    Route::prefix('dashboard-admin')->group(function () {
         Route::prefix('asistencias')->group(function () {
             Route::get('/hoy', [AsistenciaController::class, 'getAsistenciasHoy']);
             Route::get('/recientes', [AsistenciaController::class, 'getLatestAsistencias']);
         });
-
-        // Empleados para el Dashboard Admin
         Route::prefix('empleados')->group(function () {
             Route::get('/status-counts', [EmpleadoController::class, 'getStatusCounts']);
             Route::get('/recien-ingresados', [EmpleadoController::class, 'getRecentlyHired']);
         });
-
-        // Vacaciones para el Dashboard Admin
         Route::prefix('vacaciones')->group(function () {
             Route::get('/resumen-estados/{anio}', [VacacionesController::class, 'getResumenEstadosVacaciones']);
             Route::get('/proximas', [VacacionesController::class, 'getProximasVacaciones']);
             Route::get('/dias-por-mes/{anio}', [VacacionesController::class, 'getDiasVacacionesPorMes']);
             Route::get('/empleados/top-antiguos', [VacacionesController::class, 'getTopEmpleadosAntiguos']);
         });
-
-        // Usuarios para el Dashboard Admin
         Route::prefix('users')->group(function () {
             Route::get('/total', [UserController::class, 'getTotalUsersCount']);
             Route::get('/by-role', [UserController::class, 'getUsersCountByRole']);
@@ -299,6 +239,4 @@ Route::middleware('api')->group(function () {
         Route::get('solicitudes/pendientes', [EmployeeDashboardController::class, 'getSolicitudesPendientes']);
     });
 
-
-    });//fin del middleware 'auth:sanctum'
-});//Find el Middleware 'api
+}); // Fin del grupo de middleware 'auth:sanctum'

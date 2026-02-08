@@ -25,103 +25,97 @@ use Illuminate\Support\Facades\Hash; // Para verificar contraseñas
 class AuthController extends Controller
 {
 
-/**
- * Registra público de un nuevo usuario. Con asignación automática de roles.
- * Requiere que el usuario autenticado tenga el rol 'admin'.
- *
- * @param  \Illuminate\Http\Request  $request
- * @return \Illuminate\Http\JsonResponse
- */
-public function register(Request $request)
-{
-    try {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users,email',
-            'password' => 'required|string|min:8|confirmed',//busca campopassword_confirmation
-        ]);
+  /**
+     * Registra público de un nuevo usuario. Con asignación automática de roles.
+     * Requiere que el usuario autenticado tenga el rol 'admin'.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function register(Request $request)
+    {
+        try {
+            // Paso 1: Validación inicial de los datos de la solicitud.
+            // La regla 'unique:users,email' se encarga de la primera validación de correo.
+            $validated = $request->validate([
+                'name' => 'required|string|max:255',
+                'email' => 'required|string|email|max:255|unique:users,email',
+                'password' => 'required|string|min:8|confirmed',
+            ]);
 
-        // --- Validación 1: ¿El correo ya está registrado en la base de usuarios? ---
-        $existingUser = User::where('email', $validated['email'])->first();
+            // Paso 2: Buscar si existe un empleado con ese correo.
+            $empleado = Empleado::where('email', $validated['email'])->first();
+            $role = UserRole::User->value; // Rol por defecto, se ajustará si es empleado.
 
-        // Si el correo ya está registrado, devolver un mensaje de error
-        if ($existingUser) {
-            return response()->json([
-                'message' => 'El correo electrónico ya está registrado en el sistema. Por favor, utiliza otro correo o inicia sesión.',
-            ], 400); // Código HTTP 400 - Bad Request
-        }
+            // Paso 3: Lógica de asignación de rol y confirmación.
+            if ($empleado) {
+                // Si el correo se encuentra en la base de empleados, asignamos el rol de 'Empleado'.
+                if ($empleado->status === 'INACTIVO') {
+                    // Lanzar una excepción de negocio si el empleado está inactivo.
+                    throw new BusinessException("No se puede registrar un empleado que se encuentra Inactivo", 400); // Código 400 para BusinessException
+                }
+                $role = UserRole::Employee->value;
+                $message = 'Correo encontrado en empleados. Se asignará el rol de "Empleado".';
+            } else {
+                // Si el correo NO se encuentra en la tabla de empleados.
+                // Se requiere confirmación del frontend para registrar como usuario regular.
+                if (!$request->boolean('confirmed_as_user')) {
+                    return response()->json([
+                        'message' => 'El correo no se encontró en la base de empleados. Si desea continuar, será registrado como un usuario regular.',
+                        'role_suggested' => UserRole::User->value, // El rol sugerido para el frontend
+                        'action_required' => true, // Indica al frontend que necesita confirmación
+                    ], 200); // Se devuelve 200 para indicar que la solicitud fue procesada y se espera una acción.
+                }
 
-        // Buscar si existe un empleado con ese correo
-        $empleado = Empleado::where('email', $validated['email'])->first();
-
-        // --- Validación 2: Si el correo se encuentra en la base de empleados, asignamos el rol de 'Empleado' ---
-        if ($empleado) {
-            $role = UserRole::Employee->value;
-            $message = 'Correo encontrado en empleados. Se asignará el rol de "Empleado".';
-        } else {
-            // Si no se encuentra, verificar si el usuario ya confirmó continuar como "Usuario"
-            if (!$request->boolean('confirmed_as_user')) {
+                // Si 'confirmed_as_user' es true, se procede a registrarlo como usuario normal.
                 $role = UserRole::User->value;
-                $message = 'No encontramos el correo en la base de empleados. Si desea continuar, será registrado como <Usuario> .';
-
-                return response()->json([
-                    'message' => $message,
-                    'role' => $role,
-                    'action_required' => true, // Indica que se necesita confirmación
-                ], 200);
+                $message = 'Correo no encontrado en empleados. Se registrará como "Usuario" normal.';
             }
 
-        if ($empleado && $empleado->status === 'INACTIVO'){
-            throw new BusinessException("No se puede registrar un empleado que se encuentra Inactivo");
+            // Paso 4: Crear el nuevo usuario con el rol correspondiente.
+            $user = User::create([
+                'name' => $validated['name'],
+                'email' => $validated['email'],
+                'password' => Hash::make($validated['password']),
+                'role' => $role,
+                'is_active' => true,
+                'empleado_id' => $empleado?->id, // Asigna el ID del empleado si existe
+                'must_change_password' => false,
+            ]);
+
+            // Paso 5: Notificar al usuario.
+            $loginUrl = env('APP_FRONTEND_LOGIN_URL', 'http://localhost:3000/login');
+            $user->notify(new RegisterUserNotification($user, $loginUrl, $request->ip()));
+
+            // Paso 6: Devolver una respuesta exitosa.
+            return response()->json([
+                'message' => 'Usuario registrado exitosamente.',
+                'details' => [
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'role' => $user->role, // Incluir el rol final en la respuesta exitosa
+                ]
+            ], 201); // 201 Created es el código adecuado para la creación de recursos.
+
+        } catch (ValidationException $e) {
+            // Captura errores de validación de Laravel.
+            return response()->json([
+                'message' => 'Error de validación.',
+                'errors' => $e->errors()
+            ], 422); // 422 Unprocessable Entity para errores de validación.
+        } catch (BusinessException $e) {
+            // Captura excepciones de negocio personalizadas.
+            // Asegúrate de que tu ApiResponse::send maneje el código HTTP correctamente.
+            return ApiResponse::send($e->getCode(), $e->getMessage());
+        } catch (\Exception $e) {
+            // Captura cualquier otra excepción inesperada.
+            Log::error('Error en registro público:', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'message' => 'Error inesperado al registrar el usuario.',
+                'error' => $e->getMessage(),
+            ], 500); // 500 Internal Server Error para errores inesperados.
         }
-
-            // Si confirmó, se procede como "Usuario"
-            $role = UserRole::User->value;
-            $message = 'Correo no encontrado en empleados. Se registrará como "Usuario".';
-        }
-
-
-        // Crear el nuevo usuario con el rol correspondiente
-        $user = User::create([
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'password' => Hash::make($validated['password']),
-            'role' => $role,
-            'is_active' => true,
-            'empleado_id' => $empleado?->id, // Si hay un empleado asociado, asignamos el ID
-            'must_change_password' => false,// Aquí sería 'false' para el registro público
-                                                // Si un usuario se auto-registra, no debería cambiar la contraseña
-
-        ]);
-
-        // Notificar al usuario
-        $loginUrl = env('APP_FRONTEND_LOGIN_URL', 'http://localhost:3000/login');
-        $user->notify(new RegisterUserNotification($user, $loginUrl, $request->ip()));
-
-        // Devolver una respuesta exitosa con los datos del usuario registrado
-        return response()->json([
-            'message' => 'Usuario registrado exitosamente.',
-            'details' => [
-                'name' => $user->name,
-                'email' => $user->email,
-            ]
-        ], 201); // Código HTTP 201 - Created
-
-    } catch (ValidationException $e) {
-        return response()->json([
-            'message' => 'Error de validación.',
-            'errors' => $e->errors()
-        ], 422);
-    } catch (BusinessException $e) {
-        return ApiResponse::send($e->getCode(), $e->getMessage());
-    } catch (\Exception $e) {
-        Log::error('Error en registro público:', ['error' => $e->getMessage()]);
-        return response()->json([
-            'message' => 'Error inesperado al registrar el usuario.', $e,
-            'error' => $e->getMessage(),
-        ], 500);
     }
-}
 
 /**
  * ¿Qué hace esto?
@@ -154,8 +148,9 @@ public function register(Request $request)
 
         // Si el usuario no existe
         if (!$user) {
-            return response()->json(['message' => 'Credenciales inválidas. Por favor, verifica tu email y contraseña.'], 404);
-        }
+            return response()->json(['message' => 'Email/Contraseña  invalidos'], 400);
+        } 
+
 
         // Si el usuario está inactivo
         if (!$user->is_active) {

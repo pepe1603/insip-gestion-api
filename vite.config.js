@@ -1,3 +1,5 @@
+// backend/vite.config.js
+// Este archivo es la configuración de Vite para el proyecto backend.
 import { defineConfig } from 'vite';
 import laravel from 'laravel-vite-plugin';
 import Vue from '@vitejs/plugin-vue';
@@ -23,4 +25,15 @@ export default defineConfig({
             '/api': process.env.VITE_API_URL || 'http://localhost:8000',  // Redirige a la URL de la API definida en .env
         },
     },
+    // --- NUEVA CONFIGURACIÓN PARA ELIMINAR CONSOLE.LOGS EN PRODUCCIÓN ---
+    build: {
+      minify: 'terser',
+      terserOptions: {
+        compress: {
+          drop_console: true,
+          drop_debugger: true,
+        },
+      },
+    },
+    // --- FIN DE LA NUEVA CONFIGURACIÓN ---
 });

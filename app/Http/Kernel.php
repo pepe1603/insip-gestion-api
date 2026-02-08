@@ -4,6 +4,7 @@ namespace App\Http;
 
 use App\Http\Middleware\Authenticate;
 use App\Http\Middleware\TestMiddleware;
+use Illuminate\Http\Middleware\HandleCors;
 use Illuminate\Foundation\Http\Kernel as HttpKernel;
 use App\Http\Middleware\TrustProxies;  // Asegúrate de importar esta clase
 use App\Http\Middleware\EncryptCookies;  // Asegúrate de importar esta clase
@@ -39,6 +40,7 @@ protected $middleware = [
     protected $middlewareGroups = [
         'web' => [
             EncryptCookies::class,  // Lo mismo aquí
+            
             \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
             \Illuminate\Session\Middleware\StartSession::class,
             \Illuminate\Session\Middleware\AuthenticateSession::class,
@@ -52,6 +54,8 @@ protected $middleware = [
             //'auth', //solo si quieremos aplicar autherntication a toas las rutas api del grupo
             'throttle:api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            //HandleCors::class,
+            
         ],
     ];
 

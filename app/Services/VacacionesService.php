@@ -2,9 +2,9 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\Log;
 use Throwable;
 use Carbon\Carbon;
+use App\Models\User;
 use App\Models\Empleado;
 use App\Models\Vacaciones;
 use App\Helpers\ApiResponse;
@@ -12,11 +12,13 @@ use App\Models\Departamento;
 use App\Models\CicloServicio;
 use App\Models\EstadoSolicitud;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+//use Illuminate\Foundation\Auth\User;
 use App\Models\VacacionesOfficiales;
-use Illuminate\Foundation\Auth\User;
 use App\Exceptions\BusinessException;
 use Illuminate\Notifications\Notification;
 use App\Notifications\NotificarEmpleadoEstadoSolicitud;
+use App\Notifications\NotificarAdminSolicitudVacaciones;
 use App\Notifications\NotificarEmpleadoSolicitudEnviada;
 use App\Exceptions\EmpleadosExceptions\EmpleadoNoEncontradoException;
 use App\Exceptions\VacacionesExceptions\VacacionNoEncontradaException;
