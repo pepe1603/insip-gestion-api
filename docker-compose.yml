@@ -81,7 +81,7 @@ services:
       API_CONTACT_PHONE: ${API_CONTACT_PHONE}
       API_SUPPORT_URL: ${API_SUPPORT_URL}
       API_STATUS: ${API_STATUS}
-      VITE_API_URL: ${VITE_API_URL}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
     depends_on:
       db:
         condition: service_healthy
@@ -148,36 +148,13 @@ services:
       API_CONTACT_PHONE: ${API_CONTACT_PHONE}
       API_SUPPORT_URL: ${API_SUPPORT_URL}
       API_STATUS: ${API_STATUS}
-      VITE_API_URL: ${VITE_API_URL}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+
     depends_on:
       db:
         condition: service_healthy # El worker también necesita que la DB esté lista
     command: >
       sh -c "echo 'Esperando que la base de datos esté completamente lista antes de iniciar el Queue Worker...' && sleep 30 && echo 'Iniciando Laravel Queue Worker...' && php artisan queue:work --tries=3 --timeout=90 --sleep=3"
-
-  # Servicio del Frontend (con su propio Nginx dentro del contenedor)
-  frontend_app:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        # Pasa la IP del servidor host a la etapa de construcción del Dockerfile
-        # para que se use en la sustitución del .env del frontend.
-        # Aquí puedes usar una variable de entorno de tu .env principal
-        # o hardcodearla si siempre es la misma.
-        HOST_API_URL: ${VITE_API_URL_BUILD} # Esta variable debe existir en tu .env principal
-    container_name: insip_frontend_app
-    restart: always
-    ports:
-      - "81:80"
-    # No necesitas pasar las variables de entorno aquí a menos que quieras
-    # que estén disponibles en el contenedor en tiempo de ejecución para algo más,
-    # pero Vite las "incrusta" en el build.
-    # environment:
-    #   - VITE_API_URL=${VITE_API_URL_BUILD}
-    #   - VITE_LAST_DEPLOYMENT_DATE=${VITE_LAST_DEPLOYMENT_DATE}
-    depends_on:
-      - backend_app
 
 volumes:
   sqlserver_data:

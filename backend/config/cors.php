@@ -22,7 +22,7 @@ return [
 
     //'allowed_origins' => ['http://localhost:5174', 'http://127.0.0.1:5174'],
     // Esta es la forma recomendada de leer orígenes desde el .env
-    'allowed_origins' => explode(',', env('CORS_ALLOWED_ORIGINS', 'http://localhost:5174')),
+    'allowed_origins' => explode(',', env('CORS_ALLOWED_ORIGINS', '')),
 
 
     'allowed_headers' => ['*'], // Permite todos los encabezados
